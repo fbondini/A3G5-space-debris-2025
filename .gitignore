@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -172,3 +173,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+=======
+
+breakup_modeling/__pycache__/
+>>>>>>> gehly-branch
