@@ -305,7 +305,6 @@ def propagate_state_and_covar(Xo, Po, tvec, state_params, int_params, bodies=Non
     
     '''
     
-    
     # Compute sigma point weights
     n = len(Xo)
     beta = 2.   # Gaussian distribution/Least Squares cost
