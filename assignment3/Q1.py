@@ -27,14 +27,14 @@ rso_catalog =  data[0]
 ID = 40697  # ID of the to-defend-object
 
 
-F1_ids = perigee_apogee_filter(rso_catalog , 50e3, ID)
+F1_ids = perigee_apogee_filter(rso_catalog , 30e3, ID)
 filtered_rso_catalog = {key: rso_catalog[key] for key in F1_ids}
 
-F2_ids = time_filter(filtered_rso_catalog , 30e3, ID)
+F2_ids = time_filter(filtered_rso_catalog , 60e3, ID)
 filtered_rso_catalog_2 = {key: filtered_rso_catalog[key] for key in F2_ids}
 
 #### Testing the quality of the filters ####
-rso_catalog = filtered_rso_catalog
+# rso_catalog = filtered_rso_catalog_2
 ids = rso_catalog.keys()
 state_ref = rso_catalog[ID]['state']
 tdb_epoch = rso_catalog[ID]['epoch_tdb']
@@ -73,43 +73,72 @@ int_params = dict(
     rtol = 1e-10,
     atol = 1e-10
 )
-T = []
-rho = []
+T = np.zeros((100, 100)) 
+rho = np.zeros((100, 100))
+
 t_range = [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY]
-for i in range(len(ids)):
-    if list(ids)[i] != ID:
-        print(i)
-        id = list(ids)[i]
-        state_2 = rso_catalog[id]['state']
+# for i in range(len(rso_catalog)):
+#     if list(ids)[i] != ID:
+#         print(i)
+#         id = list(ids)[i]
+#         state_2 = rso_catalog[id]['state']
 
-        Cd_2 = rso_catalog[id]['Cd']
+#         Cd_2 = rso_catalog[id]['Cd']
 
-        Cr_2 = rso_catalog[id]['Cr']
+#         Cr_2 = rso_catalog[id]['Cr']
 
-        area_2 = rso_catalog[id]['area']
+#         area_2 = rso_catalog[id]['area']
 
-        mass_2 = rso_catalog[id]['mass']
+#         mass_2 = rso_catalog[id]['mass']
 
-        state_params_2 = dict(
-        central_bodies = central_bodies , 
-        bodies_to_create = bodies_to_create , 
-        mass = mass_2 , area = area_2 , 
-        Cd = Cd_2 , Cr = Cr_2 , 
-        sph_deg = sph_deg , 
-        sph_ord = sph_ord
-        )
-        T_list , rho_list = ConjunctionUtilities.compute_TCA(state_ref, state_2 , t_range, state_params_1 , state_params_2 , int_params )
-        T.append(T_list)
-        rho.append(rho_list)
+#         state_params_2 = dict(
+#         central_bodies = central_bodies , 
+#         bodies_to_create = bodies_to_create , 
+#         mass = mass_2 , area = area_2 , 
+#         Cd = Cd_2 , Cr = Cr_2 , 
+#         sph_deg = sph_deg , 
+#         sph_ord = sph_ord
+#         )
+#         T_list , rho_list = ConjunctionUtilities.compute_TCA(state_ref, state_2 , t_range, state_params_1 , state_params_2 , int_params, rho_min_crit=50e3)
+#         n = len(T_list)
+#         T[i, 0:n ] = T_list
+#         rho[i, 0:n ] = rho_list
 
-# Save the results to a .dat file
-with open('T_rho_results_1.dat', 'w') as file:
-    for t_list, rho_list in zip(T, rho):
-        for t, r in zip(t_list, rho_list):
-            file.write(f"{t}\t{r}\n")
-    # Retreive the information regarding the to-defed-body, including mean state and covariance matrix (ECI, 2025-04-01 12:00 TDB)
+# # Save the results to a .dat file
+# with open('T_rho_results.dat', 'w') as file:
+#     for i in range(T.shape[0]):
+#         for j in range(T.shape[1]):
+#             if T[i, j] != 0 or rho[i, j] != 0:  # Avoid saving uninitialized values
+#                 file.write(f"{i}\t{j}\t{T[i, j]}\t{rho[i, j]}\n")
+#     # Retreive the information regarding the to-defed-body, including mean state and covariance matrix (ECI, 2025-04-01 12:00 TDB)
 
-# Create dictionary of state parameters for the propagation
+# # Create dictionary of state parameters for the propagation
+
+##### MAIN FUNCTION, JEEEE ######
 
 
-    
+## GET AS INPUT THE CATALOG, the screening distance (To be defined) and smth else (ref ID of objet)
+
+
+result = conjunction_assessment(rso_catalog , 50e3, ID)
+
+# Save the result list of dictionaries to a file
+output_file = 'conjunction_assessment_results.pkl'
+
+with open(output_file, 'wb') as file:
+    pickle.dump(result, file)
+
+print(f"Results saved to {output_file}")
+
+
+# Filter out dictionaries with empty values
+filtered_result = [entry for entry in result if entry['Pc'] or entry['distance_at_tca']]
+
+# Save the filtered result list of dictionaries to a file
+filtered_output_file = 'filtered_conjunction_assessment_results.pkl'
+
+with open(filtered_output_file, 'wb') as file:
+    pickle.dump(filtered_result, file)
+
+print(f"Filtered results saved to {filtered_output_file}")
+print(filtered_result)

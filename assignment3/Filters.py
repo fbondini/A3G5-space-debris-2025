@@ -14,8 +14,9 @@ import os
 import matplotlib.pyplot as plt
 from tudatpy import astro
 from tudatpy import constants
+import ConjunctionUtilities
 
-import TudatPropagator as prop
+import TudatPropagator 
 
 def perigee_apogee_filter(rso_catalog, D, ID_ref):
     print("Start of the perigee-apogee screening")
@@ -138,7 +139,7 @@ def time_filter(rso_catalog , D , ID_ref):
             int_p_1 = [ur_p1 , ur_p2]
             int_p_2 = [ur_p3 , ur_p4]
 
-            ur_s1 , ur_s2 , ur_s3 , ur_s4 = compute_u_r(a_p , e_p, I_r , ax_p , ay_p , D)
+            ur_s1 , ur_s2 , ur_s3 , ur_s4 = compute_u_r(a_s , e_s, I_r , ax_s , ay_s , D)
 
             if ur_s1 == -30:
                 cooplanar_ids.append(ID_2)
@@ -168,8 +169,6 @@ def time_filter(rso_catalog , D , ID_ref):
     print(f"Filtering completed for the datased. About {perc_of_filter}% of objects have been discarted")
     print(f"Number of remaining objects: {len(non_filtered_ids)}")
     print(f"Objects survived: {non_filtered_ids}")
-    indices_non_filtered = [list(IDs).index(ID) for ID in non_filtered_ids]
-    print(f"Indices of non-filtered objects: {indices_non_filtered}")
 
     return non_filtered_ids
 
@@ -468,3 +467,191 @@ def true_to_mean_anomaly(true_anomaly, eccentricity):
     mean_anomaly = eccentric_anomaly - eccentricity * np.sin(eccentric_anomaly)
 
     return mean_anomaly
+
+
+def mahalanobis_distance(X1, P1, X2, P2):
+    """
+    Compute the Mahalanobis distance between two objects.
+
+    Parameters:
+    X1 : numpy.ndarray
+        State vector of the first object (position and velocity).
+    P1 : numpy.ndarray
+        Covariance matrix of the first object.
+    X2 : numpy.ndarray
+        State vector of the second object (position and velocity).
+    P2 : numpy.ndarray
+        Covariance matrix of the second object.
+
+    Returns:
+    float
+        The Mahalanobis distance.
+    """
+    relative_position = X1[:3] - X2[:3]
+    combined_covariance = P1[:3, :3] + P2[:3, :3]
+    inv_combined_covariance = np.linalg.inv(combined_covariance)
+    distance = np.sqrt(relative_position.T @ inv_combined_covariance @ relative_position)
+    return distance
+def conjunction_assessment(rso_catalog, D, ID , padding = 30e3, treshold = 5e3):
+
+    ### FILTERING OF THE CATALOG ###
+
+    F1_ids = perigee_apogee_filter(rso_catalog , padding , ID)
+
+    N = len(F1_ids)
+
+    filtered_rso_catalog = {key: rso_catalog[key] for key in F1_ids}
+
+    ### SOME objects will survive. Procede computing the TCA(s) using a spherical screening volume...the latter may be output of a function (?)
+        
+    rso_catalog = filtered_rso_catalog
+    ids = rso_catalog.keys()
+    state_ref = rso_catalog[ID]['state']
+    P_ref = rso_catalog[ID]['covar']
+    tdb_epoch = rso_catalog[ID]['epoch_tdb']
+    Cd_1 = rso_catalog[ID]['Cd']
+
+    Cr_1 = rso_catalog[ID]['Cr']
+
+    area_1 = rso_catalog[ID]['area']
+
+    mass_1 = rso_catalog[ID]['mass']
+
+    # Define additional parameters for the propagation
+
+    sph_deg = 8
+
+    sph_ord = 8
+
+    central_bodies = ['Earth']
+
+    bodies_to_create = ['Earth', 'Sun', 'Moon']
+    state_params_1 = dict(
+        central_bodies = central_bodies , 
+        bodies_to_create = bodies_to_create , 
+        mass = mass_1 , area = area_1 , 
+        Cd = Cd_1 , Cr = Cr_1 , 
+        sph_deg = sph_deg , 
+        sph_ord = sph_ord
+        )
+
+    # Define integrator parameters = dict(step , max_step, min_step,rtol, atol, tudat_integrator)
+    int_params = dict(
+        tudat_integrator = 'rkf78',
+        step = 10,
+        max_step = 1000,
+        min_step = 1e-3,
+        rtol = 1e-12,
+        atol = 1e-12
+    )
+    T = np.zeros((100, 100)) 
+    rho = np.zeros((100, 100))
+
+    t_range = [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY]
+    # for i in range(len(rso_catalog)):
+    #     if list(ids)[i] != ID:
+    #         print(i)
+    #         id = list(ids)[i]
+    #         state_2 = rso_catalog[id]['state']
+
+    #         Cd_2 = rso_catalog[id]['Cd']
+
+    #         Cr_2 = rso_catalog[id]['Cr']
+
+    #         area_2 = rso_catalog[id]['area']
+
+    #         mass_2 = rso_catalog[id]['mass']
+
+    #         state_params_2 = dict(
+    #         central_bodies = central_bodies , 
+    #         bodies_to_create = bodies_to_create , 
+    #         mass = mass_2 , area = area_2 , 
+    #         Cd = Cd_2 , Cr = Cr_2 , 
+    #         sph_deg = sph_deg , 
+    #         sph_ord = sph_ord
+    #         )
+    #         T_list , rho_list = ConjunctionUtilities.compute_TCA(state_ref, state_2 , t_range, state_params_1 , state_params_2 , int_params, rho_min_crit = D)
+    #         n = len(T_list)
+    #         T[i, 0:n ] = T_list
+    #         rho[i, 0:n ] = rho_list
+
+    # #Save the results to a .dat file
+    # with open('T_rho_results_1.dat', 'w') as file:
+    #     for i in range(T.shape[0]):
+    #         for j in range(T.shape[1]):
+    #             if T[i, j] != 0 or rho[i, j] != 0:  # Avoid saving uninitialized values
+    #                 file.write(f"{i}\t{j}\t{T[i, j]}\t{rho[i, j]}\n")
+
+    # Of all the different TCA, save the index that violates the treshold, and print their value...
+
+    # Loop through the indices of violating objects
+    # Read the file T_rho_results_1.dat and retrieve T and rho
+    T = np.zeros((N, 30))
+    rho = np.zeros((N, 30))
+
+    try:
+        with open('T_rho_results_1.dat', 'r') as file:
+            for line in file:
+                i, j, T_val, rho_val = map(float, line.split())
+                i, j = int(i), int(j)
+                T[i, j] = T_val
+                rho[i, j] = rho_val
+    except FileNotFoundError:
+        print("File T_rho_results_1.dat not found.")
+    result = []
+    for i in range(N):
+        Pc_tot = []
+        Uc_tot = []
+        euclidean_dist = []
+        mahalanobius_dist = []
+        if any(rho[i, :] < treshold):  # Check if any rho value for this object is below the threshold
+            violating_id = list(ids)[i]
+            for j in range(T.shape[1]):
+                if rho[i, j] != 0 and rho[i, j] < treshold:  # Check if this specific rho value violates the threshold
+                    encounter_time = T[i, j]
+                    ## Lets compute some collision probability! 
+                    ## First, we need propagate everything again to TCA, this time with also the covariance!
+                    state_2 = rso_catalog[violating_id]['state']
+                    P_2 = rso_catalog[violating_id]['covar']
+                    Cd_2 = rso_catalog[violating_id]['Cd']
+                    Cr_2 = rso_catalog[violating_id]['Cr']
+                    area_2 = rso_catalog[violating_id]['area']
+                    mass_2 = rso_catalog[violating_id]['mass']
+
+                    state_params_2 = dict(
+                    central_bodies = central_bodies , 
+                    bodies_to_create = bodies_to_create , 
+                    mass = mass_2 , area = area_2 , 
+                    Cd = Cd_2 , Cr = Cr_2 , 
+                    sph_deg = sph_deg , 
+                    sph_ord = sph_ord
+                    )
+                    print(f"{i} and {j}")
+                    tf, Xf_1 , Pf_1 = TudatPropagator.propagate_state_and_covar(state_ref , P_ref , [tdb_epoch , encounter_time], state_params_1 , int_params)
+
+                    tf, Xf_2 , Pf_2 = TudatPropagator.propagate_state_and_covar(state_2 , P_2 , [tdb_epoch , encounter_time], state_params_2 , int_params)
+
+
+                    r1 = np.sqrt(area_1/(4*np.pi))
+
+                    r2 = np.sqrt(area_2/(4*np.pi))
+
+                    HBR = r1 + r2
+
+                    Pc_i = ConjunctionUtilities.Pc2D_Foster(Xf_1 , Pf_1, Xf_2 , Pf_2 , HBR)
+                    Uc2D_i = ConjunctionUtilities.Uc2D(Xf_1 , Pf_1, Xf_2 , Pf_2 , HBR)
+                    distance_at_tca = np.linalg.norm(Xf_1[:3] - Xf_2[:3])
+                    mahalanobius_dist_at_tca = mahalanobis_distance(Xf_1 , Pf_1,Xf_2 , Pf_2)
+                    Pc_tot.append(Pc_i)
+                    Uc_tot.append(Uc2D_i)
+                    euclidean_dist.append(distance_at_tca)
+                    mahalanobius_dist.append(mahalanobius_dist_at_tca)
+            results_dict = {
+                "id": violating_id,
+                "Pc": Pc_tot,
+                "distance_at_tca": euclidean_dist,
+                "mahalanobis_distance": mahalanobius_dist,
+                "Uc":Uc_tot
+            }
+            result.append(results_dict)
+    return result
