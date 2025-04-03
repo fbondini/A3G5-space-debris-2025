@@ -6,6 +6,7 @@ import numpy as np
 import math
 from datetime import datetime
 from scipy.integrate import dblquad
+from scipy.integrate import quad
 from scipy.special import erfcinv
 from scipy.optimize import fsolve
 import pickle
@@ -18,6 +19,141 @@ import ConjunctionUtilities
 
 import TudatPropagator 
 
+# Constants
+mu = 3.986004418e14  # Earth's gravitational parameter (m^3/s^2)
+Re = 6378137  # Earth's radius (m)
+omega_e = 7.2921159e-5  # Earth's rotation rate (rad/s)
+from scipy.constants import g as g0, R as R_universal
+R_specific = R_universal / 0.0289644  # Specific gas constant for air (J/(kg·K))
+def atmospheric_density(a ,e ,v):
+    """
+    Computes the atmospheric density based on altitude using an exponential model
+    with tabulated values from the U.S. Standard Atmosphere, 1976.
+    """
+    rad = r(a, e ,v)
+    h = height_from_radius(rad)
+    # Tabulated altitudes (km) and corresponding densities (kg/m^3)
+    altitudes = np.array([0, 30, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000])
+    densities = np.array([1.2250, 0.0190, 1.4275e-4, 5.297e-7, 6.967e-9, 2.5407e-10, 6.0706e-11, 2.9710e-12, 3.6662e-13, 2.8028e-12, 7.2070e-13, 2.8028e-13, 1.1367e-13, 6.5228e-14, 5.7114e-14, 3.8993e-14, 2.5970e-14, 1.1336e-14, 8.9012e-15, 5.8295e-15, 3.6698e-15, 3.5611e-15])
+    scale_heights = np.array([7.249, 6.349, 5.877, 5.799, 5.382, 5.799, 7.249, 6.349, 5.877, 5.382, 5.799, 7.249, 6.349, 5.877, 5.382, 5.799, 7.249, 6.349, 5.877, 5.382, 5.799, 7.249])
+
+    # Convert altitude from meters to kilometers
+    h = h / 1000.0
+    # Check altitude range and assign constant density
+    if h < 0:
+        return densities[0]  # Below the first layer
+    elif h > 1000:
+        return 0.0  # Above 1000 km, density is zero
+
+    # Find the layer index for the given altitude
+    layer = np.searchsorted(altitudes, h) - 1
+    if layer < 0:
+        return densities[0]  # Below the first layer
+    elif layer >= len(densities) - 1:
+        return densities[-1]  # Above the last defined layer
+
+    # Use constant density for the layer
+    print(f"density {densities[layer]}")
+    return densities[layer]
+
+
+
+def height_from_radius(r):
+    """
+    Calculates the height above the Earth's surface given the radial distance.
+    Takes into account the ellipsoidal shape of the Earth.
+    """
+    Re_equator = 6378000  # Earth's equatorial radius (m)
+   
+    h = r - Re
+    print(f"height {h}")
+    return h
+
+
+def velocity(a, e, v):
+    """
+    Computes the satellite velocity relative to the atmosphere.
+    """
+    p = a * (1 - e**2)
+    V = np.sqrt(mu * (1 + e**2 + 2 * e * np.cos(v)) / p)
+    return V
+
+
+def r(a, e, v):
+    """
+    Calculate the orbital radius for given semi-major axis, eccentricity, and true anomaly.
+    """
+    return a * (1 - e**2) / (1 + e * np.cos(v))
+
+def da_dt(a, e, i, B):
+    """
+    Computes the rate of change of the semi-major axis (da/dt) due to atmospheric drag.
+    """
+
+    integrand = lambda v: atmospheric_density(a , e, v) * velocity(a, e, v) * (
+        1 + e**2 + 2 * e * np.cos(v) - omega_e * np.cos(i) * np.sqrt(
+        (a**3 * (1 - e**2)**3) / mu) )* (r(a, e, v)**2 / (a * (1 - e**2)**(3/2)))
+    result, _ = quad(integrand, 0, 2 * np.pi)
+    return -B / (2 * np.pi) * result
+
+
+def de_dt(a, e, i, B):
+    """
+    Computes the rate of change of the eccentricity (de/dt) due to atmospheric drag.
+    """
+    integrand = lambda v: atmospheric_density(a , e, v) * velocity(a, e, v) * (
+        e + np.cos(v) - (r(a, e, v)**2 * omega_e * np.cos(i)) / (2 * np.sqrt(mu * a * (1 - e**2))) * (2 * (e + np.cos(v)) - e * np.sin(v)**2)) *(
+        (r(a, e, v) / a)**2 * (1 - e**2)**(-1/2))
+    result, _ = quad(integrand, 0, 2 * np.pi)
+    return -B / (2 * np.pi) * result
+
+
+
+def J2_J3_perturbations(a, e, i , omega):
+    """
+    Computes the J2 and J3 perturbation effects on the rates of change of the orbital elements.
+    """
+    J2 = 1.08263e-3
+    J3 = -2.5327e-6
+    p = a * (1 - e**2)
+    n = np.sqrt(a**3 / mu)
+
+    # Perturbation terms due to J2
+    dOmega_J2 = -3/2 *n* J2 * (Re / p)**2 * np.cos(i) # Ok
+
+    domega_J2 = 3/4 * n* J2 * (Re / p)**2 * (4 - 5 * np.sin(i)**2) # ok
+
+    # Perturbation terms due to J3
+    dOmega_J3 = 0 # ok
+    domega_J3 = 3/8 * n* J3 * (Re / p)**3 *(  (4 - 5 * np.sin(i)**2)* ((np.sin(i) - e**2*np.cos(i)**2)/(e*np.sin(i))) + 2*np.sin(i)*(13-15*np.sin(i)**2)*e)*np.sin(omega)  #Ok
+    de_J3 = -3/8*n*J3*(Re/p)**3*np.sin(i)*(4-5*np.sin(i)**2)*(1-e**2)*np.cos(omega)
+
+    return dOmega_J2 + dOmega_J3, domega_J2 + domega_J3 , de_J3
+
+
+def orbital_elements_rate(a, e, i, omega, B):
+    """
+    Calculates the rate of change of all orbital elements.
+    """
+    da = da_dt(a, e, i, B)
+    de = de_dt(a, e, i, B)
+    di = 0  # Inclination rate of change is zero for the simplified model
+    dOmega_J2_J3, domega_J2_J3 , de_J3 = J2_J3_perturbations(a, e, i, omega)
+    dOmega = dOmega_J2_J3
+    domega =  domega_J2_J3
+    de = de + de_J3
+
+    return da, de, di, dOmega, domega
+
+
+
+
+
+
+
+
+
+
 def perigee_apogee_filter(rso_catalog, D, ID_ref):
     print("Start of the perigee-apogee screening")
     filtered_ids = []
@@ -25,8 +161,18 @@ def perigee_apogee_filter(rso_catalog, D, ID_ref):
     print(f"Starting population dimension: {len(IDs)}")
     # Cycle within the different objects
     state_ref = rso_catalog[ID_ref]['state']
+    Cd_ref = rso_catalog[ID_ref]['Cd']
+    A_ref = rso_catalog[ID_ref]['area']
+    m_ref = rso_catalog[ID_ref]['mass']
+    B_ref = Cd_ref*(A_ref/m_ref)
 
     kepler = astro.element_conversion.cartesian_to_keplerian(state_ref, 3.986004415e14)
+
+    da, de, di, dOmega, domega = orbital_elements_rate(kepler[0], kepler[1], kepler[2], kepler[4],B_ref)
+
+    hyp_da = da*2*constants.JULIAN_DAY
+
+    print(f"Semimajor axis variation in m {hyp_da}")
 
     ae_ref = [kepler[0], kepler[1]]
 
@@ -655,3 +801,4 @@ def conjunction_assessment(rso_catalog, D, ID , padding = 30e3, treshold = 5e3):
             }
             result.append(results_dict)
     return result
+

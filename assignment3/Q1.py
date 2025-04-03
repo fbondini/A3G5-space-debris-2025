@@ -30,8 +30,8 @@ ID = 40697  # ID of the to-defend-object
 F1_ids = perigee_apogee_filter(rso_catalog , 30e3, ID)
 filtered_rso_catalog = {key: rso_catalog[key] for key in F1_ids}
 
-F2_ids = time_filter(filtered_rso_catalog , 60e3, ID)
-filtered_rso_catalog_2 = {key: filtered_rso_catalog[key] for key in F2_ids}
+# F2_ids = time_filter(filtered_rso_catalog , 60e3, ID)
+# filtered_rso_catalog_2 = {key: filtered_rso_catalog[key] for key in F2_ids}
 
 #### Testing the quality of the filters ####
 # rso_catalog = filtered_rso_catalog_2
