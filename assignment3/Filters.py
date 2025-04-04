@@ -51,9 +51,6 @@ def atmospheric_density(a ,e ,v):
         return densities[0]  # Below the first layer
     elif layer >= len(densities) - 1:
         return densities[-1]  # Above the last defined layer
-
-    # Use constant density for the layer
-    print(f"density {densities[layer]}")
     return densities[layer]
 
 
@@ -66,16 +63,17 @@ def height_from_radius(r):
     Re_equator = 6378000  # Earth's equatorial radius (m)
    
     h = r - Re
-    print(f"height {h}")
+
     return h
 
 
-def velocity(a, e, v):
+def velocity(a, e, v, i):
     """
     Computes the satellite velocity relative to the atmosphere.
     """
     p = a * (1 - e**2)
-    V = np.sqrt(mu * (1 + e**2 + 2 * e * np.cos(v)) / p)
+    n = np.sqrt(mu/a**3)
+    V = np.sqrt(mu * (1 + e**2 + 2 * e * np.cos(v)) / p) *(1 - ((1-e**2)**(3/2))/(1+e**2 + 2*e*np.cos(v))*(omega_e/n)*np.cos(i))
     return V
 
 
@@ -90,7 +88,7 @@ def da_dt(a, e, i, B):
     Computes the rate of change of the semi-major axis (da/dt) due to atmospheric drag.
     """
 
-    integrand = lambda v: atmospheric_density(a , e, v) * velocity(a, e, v) * (
+    integrand = lambda v: atmospheric_density(a , e, v) * velocity(a, e, v , i) * (
         1 + e**2 + 2 * e * np.cos(v) - omega_e * np.cos(i) * np.sqrt(
         (a**3 * (1 - e**2)**3) / mu) )* (r(a, e, v)**2 / (a * (1 - e**2)**(3/2)))
     result, _ = quad(integrand, 0, 2 * np.pi)
@@ -101,7 +99,7 @@ def de_dt(a, e, i, B):
     """
     Computes the rate of change of the eccentricity (de/dt) due to atmospheric drag.
     """
-    integrand = lambda v: atmospheric_density(a , e, v) * velocity(a, e, v) * (
+    integrand = lambda v: atmospheric_density(a,e, v) * velocity(a, e, v , i) * (
         e + np.cos(v) - (r(a, e, v)**2 * omega_e * np.cos(i)) / (2 * np.sqrt(mu * a * (1 - e**2))) * (2 * (e + np.cos(v)) - e * np.sin(v)**2)) *(
         (r(a, e, v) / a)**2 * (1 - e**2)**(-1/2))
     result, _ = quad(integrand, 0, 2 * np.pi)
@@ -113,10 +111,10 @@ def J2_J3_perturbations(a, e, i , omega):
     """
     Computes the J2 and J3 perturbation effects on the rates of change of the orbital elements.
     """
-    J2 = 1.08263e-3
-    J3 = -2.5327e-6
+    J2 = 1.7553e-5
+    J3 = -2.619e-7
     p = a * (1 - e**2)
-    n = np.sqrt(a**3 / mu)
+    n = np.sqrt(mu/a**3)
 
     # Perturbation terms due to J2
     dOmega_J2 = -3/2 *n* J2 * (Re / p)**2 * np.cos(i) # Ok
@@ -128,7 +126,11 @@ def J2_J3_perturbations(a, e, i , omega):
     domega_J3 = 3/8 * n* J3 * (Re / p)**3 *(  (4 - 5 * np.sin(i)**2)* ((np.sin(i) - e**2*np.cos(i)**2)/(e*np.sin(i))) + 2*np.sin(i)*(13-15*np.sin(i)**2)*e)*np.sin(omega)  #Ok
     de_J3 = -3/8*n*J3*(Re/p)**3*np.sin(i)*(4-5*np.sin(i)**2)*(1-e**2)*np.cos(omega)
 
-    return dOmega_J2 + dOmega_J3, domega_J2 + domega_J3 , de_J3
+    dM_J2 = 3/4 * J2 * n * (Re/p)**2*( 1 - e**2)*(3*np.cos(i)**2 -1)
+    dM_J3 =0# -(3/8) * n * J3 * (Re / p)**3 * np.sin(i) * (4 - 5 * np.sin(i)**2) * (1 - 4 * e**2) * ((1 - e**2)**(1/2) / e) * np.sin(omega)
+    dM_dt = dM_J2 + dM_J3
+
+    return dOmega_J2 + dOmega_J3, domega_J2 + domega_J3 , de_J3, dM_dt
 
 
 def orbital_elements_rate(a, e, i, omega, B):
@@ -138,18 +140,13 @@ def orbital_elements_rate(a, e, i, omega, B):
     da = da_dt(a, e, i, B)
     de = de_dt(a, e, i, B)
     di = 0  # Inclination rate of change is zero for the simplified model
-    dOmega_J2_J3, domega_J2_J3 , de_J3 = J2_J3_perturbations(a, e, i, omega)
+    dOmega_J2_J3, domega_J2_J3 , de_J3, dM = J2_J3_perturbations(a, e, i, omega)
     dOmega = dOmega_J2_J3
     domega =  domega_J2_J3
+
     de = de + de_J3
 
-    return da, de, di, dOmega, domega
-
-
-
-
-
-
+    return da, de, di, dOmega, domega, dM
 
 
 
@@ -168,17 +165,20 @@ def perigee_apogee_filter(rso_catalog, D, ID_ref):
 
     kepler = astro.element_conversion.cartesian_to_keplerian(state_ref, 3.986004415e14)
 
-    da, de, di, dOmega, domega = orbital_elements_rate(kepler[0], kepler[1], kepler[2], kepler[4],B_ref)
+    # da, de, di, dOmega, domega = orbital_elements_rate(kepler[0], kepler[1], kepler[2], kepler[4],B_ref)
 
-    hyp_da = da*2*constants.JULIAN_DAY
-
-    print(f"Semimajor axis variation in m {hyp_da}")
+    # print(f"Variation in semi-major axis (da): {da * 2 * constants.JULIAN_DAY}")
+    # print(f"Variation in eccentricity (de): {de * 2 * constants.JULIAN_DAY}")
+    # print(f"Variation in inclination (di): {di * 2 * constants.JULIAN_DAY}")
+    # print(f"Variation in RAAN (dOmega): {dOmega * 2 * constants.JULIAN_DAY}")
+    # print(f"Variation in argument of perigee (domega): {domega * 2 * constants.JULIAN_DAY}")
 
     ae_ref = [kepler[0], kepler[1]]
 
     Rp_ref = ae_ref[0] * (1 - ae_ref[1])
 
     Ra_ref = ae_ref[0] * (1 + ae_ref[1])
+
     print(Ra_ref/1000 -6371)
     print(Rp_ref/1000 -6371)
 
@@ -233,6 +233,10 @@ def time_filter(rso_catalog , D , ID_ref):
     IDs = rso_catalog.keys()
     print(f"Starting population dimension: {len(IDs)}")
     state_ref = rso_catalog[ID_ref]['state']
+    Cdp = rso_catalog[ID_ref]['Cd']
+    Ap = rso_catalog[ID_ref]['area']
+    mp= rso_catalog[ID_ref]['mass']
+    B_p = Cdp*(Ap/mp)
 
     kepler_ref = astro.element_conversion.cartesian_to_keplerian(state_ref, 3.986004415e14)
     a_p = kepler_ref[0]
@@ -253,6 +257,10 @@ def time_filter(rso_catalog , D , ID_ref):
             ID_2 = list(IDs)[i]
             print(f"Analyzing object {ID_2}...")
             state = rso_catalog[ID_2]['state']
+            Cd = rso_catalog[ID_2]['Cd']
+            A = rso_catalog[ID_2]['area']
+            m= rso_catalog[ID_2]['mass']
+            B_s = Cd*(A/m)
             kepler = astro.element_conversion.cartesian_to_keplerian(state, 3.986004415e14)
             print(f"COE retreived")
             a_s = kepler[0]
@@ -262,53 +270,9 @@ def time_filter(rso_catalog , D , ID_ref):
             Omega_s = kepler[4]
             theta_s = kepler[5]
             P_s = 2*np.pi*np.sqrt(a_s**3/ 3.986004415e14)
-
-            rev_s = (2 * constants.JULIAN_DAY) / P_s
-            rev_s_integer = int(rev_s)
-            rev_s_decimal = rev_s - rev_s_integer
-
-            I_r = compute_I_r(I_p , I_s , Omega_p , Omega_s)
-            
-            print(f"Relative inclination of {np.rad2deg(I_r)} degree")
-
-            delta_p , delta_s = compute_delta(I_p , I_s , Omega_p , Omega_s)
-
-            ax_p , ay_p = compute_a_vectors(e_p , w_p , delta_p)
-
-            ax_s , ay_s = compute_a_vectors(e_s , w_s , delta_s)
-
-            ur_p1 , ur_p2 , ur_p3 , ur_p4 = compute_u_r(a_p , e_p, I_r , ax_p , ay_p , D)
-
-            if ur_p1 == -30:
-                cooplanar_ids.append(ID_2)
-
-            int_p_1 = [ur_p1 , ur_p2]
-            int_p_2 = [ur_p3 , ur_p4]
-
-            ur_s1 , ur_s2 , ur_s3 , ur_s4 = compute_u_r(a_s , e_s, I_r , ax_s , ay_s , D)
-
-            if ur_s1 == -30:
-                cooplanar_ids.append(ID_2)
-
-            int_s_1 = [ur_s1 , ur_s2]
-            int_s_2 = [ur_s3 , ur_s4]
-
-            int_t_p_1 = convert_to_time_intervals(int_p_1 , w_p , e_p , delta_p , P_p , theta_p)
-
-            int_t_p_2 = convert_to_time_intervals(int_p_2 , w_p , e_p , delta_p , P_p , theta_p)
-
-            int_t_s_1 = convert_to_time_intervals(int_s_1 , w_s , e_s , delta_s , P_s , theta_s)
-
-            int_t_s_2 = convert_to_time_intervals(int_s_2 , w_s , e_s , delta_s , P_s , theta_s)
-
-
-            intersection = compute_intersection_intervals(int_t_p_1 , int_t_p_2 , int_t_s_1 , int_t_s_2 , rev_p_integer , rev_s_integer, P_p , P_s)
-            if intersection == []:
-                print(f"Object {ID_2} is filtered out by the time filter")
-                filtered_ids.append(ID_2)
-            else:
-                print(f"Object {ID_2} passes the time filter!")
-                print(f"Intersection (seconds) at {intersection}")
+            filtered_id = process_object(ID_2 , a_p , e_p , I_p , Omega_p , w_p , theta_p , P_p , B_p, D , a_s , e_s , I_s , Omega_s , w_s , theta_s , P_s , B_s)
+            if filtered_id !=[]:
+                filtered_ids.append(filtered_id)
 
     perc_of_filter = (len(filtered_ids))/(len(IDs)) * 100
     non_filtered_ids = [ID for ID in IDs if ID not in filtered_ids]
@@ -318,11 +282,89 @@ def time_filter(rso_catalog , D , ID_ref):
 
     return non_filtered_ids
 
+
+
+def process_object(ID_2, a_p, e_p, I_p, Omega_p, w_p, theta_p, P_p, B_p, D, a_s, e_s, I_s, Omega_s, w_s, theta_s, P_s, B_s):
+    """
+    Process a single object for the time filter.
+
+    Parameters:
+    ID_2 : str
+        ID of the object being processed.
+    a_p, e_p, I_p, Omega_p, w_p, theta_p, P_p, B_p : float
+        Orbital parameters of the primary object.
+    D : float
+        Distance parameter.
+    a_s, e_s, I_s, Omega_s, w_s, theta_s, P_s, B_s : float
+        Orbital parameters of the secondary object.
+    filtered_ids : list
+        List to store IDs of filtered objects.
+
+    Returns:
+    None
+    """
+    rev_s = (2 * constants.JULIAN_DAY) / P_s
+    rev_s_integer = int(rev_s)
+    rev_s_decimal = rev_s - rev_s_integer
+
+    I_r = compute_I_r(I_p, I_s, Omega_p, Omega_s)
+    print(f"Relative inclination of {np.rad2deg(I_r)} degree")
+
+    delta_p, delta_s = compute_delta(I_p, I_s, Omega_p, Omega_s)
+
+    ax_p, ay_p = compute_a_vectors(e_p, w_p, delta_p)
+    ax_s, ay_s = compute_a_vectors(e_s, w_s, delta_s)
+
+    ur_p1, ur_p2, ur_p3, ur_p4 = compute_u_r(a_p, e_p, I_r, ax_p, ay_p, D)
+    ur_s1, ur_s2, ur_s3, ur_s4 = compute_u_r(a_s, e_s, I_r, ax_s, ay_s, D)
+
+    if ur_p1 == -30 or ur_s1 == -30:
+        print(f"Object {ID_2} passes the time filter!, But just because it is coplanar")
+        return []
+    else:
+        int_p_1 = [ur_p1, ur_p2]
+        int_p_2 = [ur_p3, ur_p4]
+        int_s_1 = [ur_s1, ur_s2]
+        int_s_2 = [ur_s3, ur_s4]
+
+        int_t_p_1 = convert_to_time_intervals(int_p_1, w_p, e_p, delta_p, P_p, theta_p)
+        int_t_p_2 = convert_to_time_intervals(int_p_2, w_p, e_p, delta_p, P_p, theta_p)
+        int_t_s_1 = convert_to_time_intervals(int_s_1, w_s, e_s, delta_s, P_s, theta_s)
+        int_t_s_2 = convert_to_time_intervals(int_s_2, w_s, e_s, delta_s, P_s, theta_s)
+
+        intersection = compute_intersection_intervals(
+            int_t_p_1, int_t_p_2, int_t_s_1, int_t_s_2,P_p, P_s, a_p, e_p, I_p, Omega_p, w_p, B_p, a_s, e_s, I_s, Omega_s, w_s, B_s, delta_p, delta_s
+        )
+        if intersection == []:
+            print(f"Object {ID_2} is filtered out by the time filter")
+            return ID_2
+        else:
+            print(f"Object {ID_2} passes the time filter!")
+            print(f"Intersection (seconds) at {intersection}")
+            return []
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Check for intersection between the two intervals
 def intervals_intersect(interval1, interval2):
     return max(interval1[0], interval2[0]) <= min(interval1[1], interval2[1])
 
-def compute_intersection_intervals(intervalp1 ,intervalp2 , intervals1, intervals2, n_rev_p, n_rev_s, P_p, P_s):
+def compute_intersection_intervals(intervalp1 ,intervalp2 , intervals1, intervals2, P_p, P_s , ap , ep , ip ,O_p , wp, B_p,
+                                    a_s , e_s , i_s ,O_s , w_s, B_s , delta_p , delta_s):
     """
     Compute the intersection intervals between two orbital objects over multiple revolutions.
 
@@ -345,26 +387,53 @@ def compute_intersection_intervals(intervalp1 ,intervalp2 , intervals1, interval
         A list of tuples representing the intersection intervals in seconds.
     """
     intersections = []
+    da , de, di , dO, dw , dM = orbital_elements_rate(ap , ep , ip , wp, B_p)
+    das , des, dis , dOs, dws , dMs = orbital_elements_rate(a_s, e_s , i_s , w_s, B_s)
 
+    delta_p_dot , delta_s_dot = compute_delta_dot(ip, i_s, delta_p , delta_s , dO , dOs , O_p , O_s)
+    n0p =2* np.pi/P_p
+    n0s = 2*np.pi/P_s 
+
+
+    PDF_p = compute_PDF(n0p , dM, dw , delta_p_dot)
+    PDF_s = compute_PDF(n0s , dMs , dws, delta_s_dot)
+    dn_p = compute_n_dot(da , 3.986004415e14 , ap)
+    dn_s = compute_n_dot(das , 3.986004415e14 , a_s)
+
+    i = 0
+    j = 0
+    time_limit = 2*constants.JULIAN_DAY
+    stay = True
     # Generate intervals for the primary object over multiple revolutions
     primary_intervals = []
-    for i in range(n_rev_p):
+    while stay:
+        i = i +1
+        ### Recompute all the orbital parameters 
+        P_p = (2*np.pi)/(n0p + dM + dw - delta_p_dot + i*PDF_p*dn_p)#PDF_p*(1-(2*np.pi/n0p)*(dn_p/n0p)*i)
         start1 = intervalp1[0] + i * P_p
         end1 = intervalp1[1] + i * P_p
-        primary_intervals.append((start1, end1))
         start2 = intervalp2[0] + i * P_p
         end2 = intervalp2[1] + i * P_p
-        primary_intervals.append((start2, end2))
-
+        if start1 < time_limit and end1 < time_limit and start2 < time_limit and end2 < time_limit:
+            primary_intervals.append((start1, end1))
+            primary_intervals.append((start2, end2))
+        else:
+            stay = False
+    stay = True
     # Generate intervals for the secondary object over multiple revolutions
     secondary_intervals = []
-    for j in range(n_rev_s):
+    while stay:
+        j = j+1
+        P_s = (2*np.pi)/(n0s + dMs + dws - delta_s_dot + j*PDF_s*dn_s)
         start1 = intervals1[0] + j * P_s
         end1 = intervals1[1] + j * P_s
-        secondary_intervals.append((start1, end1))
         start2 = intervals2[0] + j * P_s
         end2 = intervals2[1] + j * P_s
-        secondary_intervals.append((start2, end2))
+        if start1 < time_limit and end1 < time_limit and start2 < time_limit and end2 < time_limit:
+            secondary_intervals.append((start2, end2))
+            secondary_intervals.append((start1, end1))
+        else: 
+            stay = False
     # Check for intersections between all intervals
     for p_interval in primary_intervals:
         for s_interval in secondary_intervals:
@@ -379,6 +448,68 @@ def compute_intersection_intervals(intervalp1 ,intervalp2 , intervals1, interval
 
     return intersections
 
+def compute_n_dot(da , mu, a ):
+    return -(3/2)*(mu/a**4)*(mu/a**3)**(-1/2)*da
+def compute_modified_period(P_DF, n0_dot, n0, K):
+    """
+    Compute the modified period P_K based on the given parameters.
+
+    Parameters:
+    P_DF : float
+        The nominal period of the orbit.
+    n0_dot : float
+        The rate of change of the mean motion.
+    n0 : float
+        The mean motion.
+    K : float
+        A constant factor.
+
+    Returns:
+    float
+        The modified period P_K.
+    """
+    P_K = P_DF * (1 - (2 * np.pi * n0_dot * K) / (n0**2))
+    return P_K
+
+def compute_PDF(n0, M0_dot , w0_dot , delta0_dot):
+    PDF = (2*np.pi)/(n0 + M0_dot + w0_dot - delta0_dot)
+    return PDF
+
+
+
+
+
+
+def compute_delta_dot(I_p, I_s, delta_p, delta_s, Omega_dot_p, Omega_dot_s , Omega_p , Omega_s):
+    """
+    Compute the rate of change of the delta angles (Δ_p and Δ_s) based on the given parameters.
+
+    Parameters:
+    I_p : float
+        Inclination of the primary orbit in radians.
+    I_s : float
+        Inclination of the secondary orbit in radians.
+    I_r : float
+        Reference inclination in radians.
+    Omega_dot_p : float
+        Rate of change of RAAN for the primary orbit in radians per second.
+    Omega_dot_s : float
+        Rate of change of RAAN for the secondary orbit in radians per second.
+
+    Returns:
+    tuple
+        A tuple containing the rates of change of Δ_p and Δ_s in radians per second.
+    """
+    I_r = compute_I_r(I_p , I_s , Omega_p, Omega_s)
+    delta_dot_p = (1 / np.sin(I_r)) * np.sin(I_s) * np.cos(delta_s)*(Omega_dot_p - Omega_dot_s)
+
+    delta_dot_s = (1 / np.sin(I_r)) * np.sin(I_p)*np.cos(delta_p)*(Omega_dot_p - Omega_dot_s)
+
+    return delta_dot_p, delta_dot_s
+
+
+
+
 def compute_K(I_s, I_p, Omega_s, Omega_p):
     """
     Compute the vector K as the cross product of w_s and w_p.
@@ -389,9 +520,9 @@ def compute_K(I_s, I_p, Omega_s, Omega_p):
     I_p : float
         Inclination of the primary orbit in radians.
     Omega_s : float
-        Right ascension of the ascending node (RAAN) of the secondary orbit in radians.
+        RAAN of the secondary orbit in radians.
     Omega_p : float
-        Right ascension of the ascending node (RAAN) of the primary orbit in radians.
+        RAAN of the primary orbit in radians.
 
     Returns:
     numpy.ndarray
@@ -415,7 +546,6 @@ def compute_K(I_s, I_p, Omega_s, Omega_p):
     K = np.cross(w_s, w_p)
 
     return K
-
 
 
 
@@ -571,7 +701,9 @@ def convert_to_time_intervals(angular_interval, omega, e, delta, P, theta0):
     tuple
         A tuple containing the start and end of the time interval (in seconds).
     """
-    ur_0, ur_1 = angular_interval
+    ur_0 = angular_interval[0]
+
+    ur_1 = angular_interval[1]
 
     # Convert angular interval to true anomalies
     true_an_0 = ur_0 - omega + delta
@@ -638,19 +770,33 @@ def mahalanobis_distance(X1, P1, X2, P2):
     inv_combined_covariance = np.linalg.inv(combined_covariance)
     distance = np.sqrt(relative_position.T @ inv_combined_covariance @ relative_position)
     return distance
-def conjunction_assessment(rso_catalog, D, ID , padding = 30e3, treshold = 5e3):
+def conjunction_assessment(rso_catalog,D, ID , padding = 30e3, treshold = 5e3):
 
     ### FILTERING OF THE CATALOG ###
 
     F1_ids = perigee_apogee_filter(rso_catalog , padding , ID)
 
+    filtered_rso_catalog = {key: rso_catalog[key] for key in F1_ids}
+
     N = len(F1_ids)
 
-    filtered_rso_catalog = {key: rso_catalog[key] for key in F1_ids}
+    # F2_ids = time_filter(filtered_rso_catalog , D , ID)
+
+    # filtered_rso_catalog_2 = {key: filtered_rso_catalog[key] for key in F2_ids}
+
+    # N = len(F2_ids)
+
+    F2_ids = screening_volume(filtered_rso_catalog , ID )
+
+    filtered_rso_catalog_2 = {key: filtered_rso_catalog[key] for key in F2_ids}
+
+    N = len(F2_ids)
+
+    print(f"Number of objects after filtering: {N}")
 
     ### SOME objects will survive. Procede computing the TCA(s) using a spherical screening volume...the latter may be output of a function (?)
         
-    rso_catalog = filtered_rso_catalog
+    rso_catalog = filtered_rso_catalog_2
     ids = rso_catalog.keys()
     state_ref = rso_catalog[ID]['state']
     P_ref = rso_catalog[ID]['covar']
@@ -694,39 +840,40 @@ def conjunction_assessment(rso_catalog, D, ID , padding = 30e3, treshold = 5e3):
     rho = np.zeros((100, 100))
 
     t_range = [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY]
-    # for i in range(len(rso_catalog)):
-    #     if list(ids)[i] != ID:
-    #         print(i)
-    #         id = list(ids)[i]
-    #         state_2 = rso_catalog[id]['state']
+    for i in range(len(rso_catalog)):
+        if list(ids)[i] != ID:
+            print(i)
+            id = list(ids)[i]
+            state_2 = rso_catalog[id]['state']
 
-    #         Cd_2 = rso_catalog[id]['Cd']
+            Cd_2 = rso_catalog[id]['Cd']
 
-    #         Cr_2 = rso_catalog[id]['Cr']
+            Cr_2 = rso_catalog[id]['Cr']
 
-    #         area_2 = rso_catalog[id]['area']
+            area_2 = rso_catalog[id]['area']
 
-    #         mass_2 = rso_catalog[id]['mass']
+            mass_2 = rso_catalog[id]['mass']
 
-    #         state_params_2 = dict(
-    #         central_bodies = central_bodies , 
-    #         bodies_to_create = bodies_to_create , 
-    #         mass = mass_2 , area = area_2 , 
-    #         Cd = Cd_2 , Cr = Cr_2 , 
-    #         sph_deg = sph_deg , 
-    #         sph_ord = sph_ord
-    #         )
-    #         T_list , rho_list = ConjunctionUtilities.compute_TCA(state_ref, state_2 , t_range, state_params_1 , state_params_2 , int_params, rho_min_crit = D)
-    #         n = len(T_list)
-    #         T[i, 0:n ] = T_list
-    #         rho[i, 0:n ] = rho_list
+            state_params_2 = dict(
+            central_bodies = central_bodies , 
+            bodies_to_create = bodies_to_create , 
+            mass = mass_2 , area = area_2 , 
+            Cd = Cd_2 , Cr = Cr_2 , 
+            sph_deg = sph_deg , 
+            sph_ord = sph_ord
+            )
+            T_list , rho_list = ConjunctionUtilities.compute_TCA(state_ref, state_2 , t_range, state_params_1 , state_params_2 , int_params, rho_min_crit = 5e3)
 
-    # #Save the results to a .dat file
-    # with open('T_rho_results_1.dat', 'w') as file:
-    #     for i in range(T.shape[0]):
-    #         for j in range(T.shape[1]):
-    #             if T[i, j] != 0 or rho[i, j] != 0:  # Avoid saving uninitialized values
-    #                 file.write(f"{i}\t{j}\t{T[i, j]}\t{rho[i, j]}\n")
+            n = len(T_list)
+            T[i, 0:n ] = T_list
+            rho[i, 0:n ] = rho_list
+
+    #Save the results to a .dat file
+    with open('T_rho_results_screen.dat', 'w') as file:
+        for i in range(T.shape[0]):
+            for j in range(T.shape[1]):
+                if T[i, j] != 0 or rho[i, j] != 0:  # Avoid saving uninitialized values
+                    file.write(f"{i}\t{j}\t{T[i, j]}\t{rho[i, j]}\n")
 
     # Of all the different TCA, save the index that violates the treshold, and print their value...
 
@@ -736,14 +883,14 @@ def conjunction_assessment(rso_catalog, D, ID , padding = 30e3, treshold = 5e3):
     rho = np.zeros((N, 30))
 
     try:
-        with open('T_rho_results_1.dat', 'r') as file:
+        with open('T_rho_results_screen.dat', 'r') as file:
             for line in file:
                 i, j, T_val, rho_val = map(float, line.split())
                 i, j = int(i), int(j)
                 T[i, j] = T_val
                 rho[i, j] = rho_val
     except FileNotFoundError:
-        print("File T_rho_results_1.dat not found.")
+        print("File T_rho_results_screen.dat not found.")
     result = []
     for i in range(N):
         Pc_tot = []
@@ -802,3 +949,86 @@ def conjunction_assessment(rso_catalog, D, ID , padding = 30e3, treshold = 5e3):
             result.append(results_dict)
     return result
 
+
+
+def screening_volume(rso_catalog , ID , filtered_ids = []):
+
+    ids = rso_catalog.keys()
+    state_ref = rso_catalog[ID]['state']
+    P_ref = rso_catalog[ID]['covar']
+    tdb_epoch = rso_catalog[ID]['epoch_tdb']
+    Cd_1 = rso_catalog[ID]['Cd']
+    Cr_1 = rso_catalog[ID]['Cr']
+    area_1 = rso_catalog[ID]['area']
+    mass_1 = rso_catalog[ID]['mass']
+    filtered_ids.append(ID)
+
+    # Define additional parameters for the propagation
+
+    sph_deg = 8
+
+    sph_ord = 8
+
+    central_bodies = ['Earth']
+
+    bodies_to_create = ['Earth', 'Sun', 'Moon']
+   
+    state_params_1 = dict(
+        central_bodies = central_bodies , 
+        bodies_to_create = bodies_to_create , 
+        mass = mass_1 , area = area_1 , 
+        Cd = Cd_1 , Cr = Cr_1 , 
+        sph_deg = sph_deg , 
+        sph_ord = sph_ord
+        )
+    step = 1
+    # Define integrator parameters = dict(step , max_step, min_step,rtol, atol, tudat_integrator)
+    int_params = dict(
+        tudat_integrator = 'rk4',
+        step = 1,
+        # max_step = 1000,
+        # min_step = 1e-3,
+        # rtol = 1e-12,
+        # atol = 1e-12
+    )
+    t_hist , X_hist = TudatPropagator.propagate_orbit(state_ref , [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY], state_params_1, int_params)
+
+    # Now loop for each object in the catalog and compute the propagated history
+    for i in range(len(ids)):
+        if list(ids)[i] != ID:
+            print(f"Analyzing object {list(ids)[i]}...")
+            id = list(ids)[i]
+            state_2 = rso_catalog[id]['state']
+
+            Cd_2 = rso_catalog[id]['Cd']
+
+            Cr_2 = rso_catalog[id]['Cr']
+
+            area_2 = rso_catalog[id]['area']
+
+            mass_2 = rso_catalog[id]['mass']
+
+            state_params_2 = dict(
+            central_bodies = central_bodies , 
+            bodies_to_create = bodies_to_create , 
+            mass = mass_2 , area = area_2 , 
+            Cd = Cd_2 , Cr = Cr_2 , 
+            sph_deg = sph_deg , 
+            sph_ord = sph_ord
+            )
+            _, X_hist_2 = TudatPropagator.propagate_orbit(state_2 , [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY], state_params_2, int_params)
+            # Compute the relative state vector
+            X_rel = X_hist_2 - X_hist
+            counter = 0
+            # Rotate the vector in RIC frame and check conditions
+            for j in range(len(X_rel[:, 0])):
+                X_ric = ConjunctionUtilities.eci2ric(X_hist[j, 0:3], X_hist[j, 3:6], X_rel[j, :3])
+
+                if abs(X_ric[0]) < 5000 and abs(X_ric[1]) < 10e3 and abs(X_ric[2]) < 5000:
+                    counter += 1
+            if counter > 0:
+                print(f"The object {id} entered the screening volume for {counter * step} seconds.")
+                filtered_ids.append(id)
+
+
+    return filtered_ids
