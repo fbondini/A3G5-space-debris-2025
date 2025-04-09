@@ -1,6 +1,7 @@
 import numpy as np
 import os
 from datetime import datetime
+from pathlib import Path
 import time
 import matplotlib.pyplot as plt
 import pickle
@@ -17,7 +18,8 @@ import ConjunctionUtilities as ConjUtil
 assignment_data_directory = 'data/unit_test'
 
 # Load RSO catalog file
-rso_file = os.path.join(assignment_data_directory, 'unit_test_rso_catalog.pkl')
+rso_file = Path(__file__).parent / "data" / "unit_test" / "unit_test_rso_catalog.pkl"
+# rso_file = os.path.join(assignment_data_directory, r'unit_test_rso_catalog.pkl')
 rso_dict = ConjUtil.read_catalog_file(rso_file)
 obj_id = 91000
 
@@ -33,7 +35,8 @@ print(list(rso_dict[obj_id].keys()))
 
 
 # Load truth data for estimation case
-truth_file = os.path.join(assignment_data_directory, 'truth_unit_test_41240.pkl')
+truth_file = Path(__file__).parent / "data" / "unit_test" / "truth_unit_test_41240.pkl"
+# truth_file = os.path.join(assignment_data_directory, 'truth_unit_test_41240.pkl')
 t_truth, X_truth, state_params = EstUtil.read_truth_file(truth_file)
 
 print('')
@@ -46,7 +49,8 @@ print(state_params)
 
 
 # Load measurement data for estimation case
-meas_file = os.path.join(assignment_data_directory, 'meas_unit_test_radar_41240.pkl')
+meas_file = Path(__file__).parent / "data" / "unit_test" / "meas_unit_test_radar_41240.pkl"
+# meas_file = os.path.join(assignment_data_directory, 'meas_unit_test_radar_41240.pkl')
 state_params, meas_dict, sensor_params = EstUtil.read_measurement_file(meas_file)
 
 print('')
@@ -173,9 +177,14 @@ print('RK78 miss distance error [m]:', rho_list[0]-rho_true)
 
 print('\nBegin UKF Test')
 
+
+thruth_file = Path(__file__).parent / "data" / "unit_test" / "truth_unit_test_41240.pkl"
+meas_file = Path(__file__).parent / "data" / "unit_test" / "meas_unit_test_radar_41240.pkl"
+
+
 # Truth and measurement data
-truth_file = os.path.join(assignment_data_directory, 'truth_unit_test_41240.pkl')
-meas_file = os.path.join(assignment_data_directory, 'meas_unit_test_radar_41240.pkl')
+#truth_file = os.path.join(assignment_data_directory, r'truth_unit_test_41240.pkl')
+#meas_file = os.path.join(assignment_data_directory, r'meas_unit_test_radar_41240.pkl')
 state_params, meas_dict, sensor_params = EstUtil.read_measurement_file(meas_file)
 
 
