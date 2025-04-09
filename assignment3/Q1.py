@@ -26,6 +26,38 @@ except pickle.UnpicklingError:
 rso_catalog =  data[0]
 ID = 40697  # ID of the to-defend-object
 
+
+F1_ids = perigee_apogee_filter(rso_catalog , 30e3 , 40697)
+
+filtered_rso_catalog_Apogee = {key: rso_catalog[key] for key in F1_ids}
+
+
+population_analysis(rso_catalog , filtered_rso_catalog_Apogee  , filtered_rso_catalog_Apogee, ID)
+
+
+LEO_id, MEO_id, GEO_id, HEO_id = full_catalog_analysis(rso_catalog)
+print("LEO:", LEO_id)
+print("MEO:", MEO_id)
+print("GEO:", GEO_id)
+print("HEO:", HEO_id)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ids = rso_catalog.keys()
 state_ref = rso_catalog[ID]['state']
 tdb_epoch = rso_catalog[ID]['epoch_tdb']
@@ -67,25 +99,20 @@ rho = np.zeros((100, 100))
 t_range = [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY]
 
 
+
+
 result = conjunction_assessment(rso_catalog , 30e3, ID)
+# # # # # # Save the result to a file for later access
+# result_file = 'conjunction_assessment_result.pkl'
+# with open(result_file, 'wb') as file:
+#     pickle.dump(result, file)
 
-# Save the result list of dictionaries to a file
-output_file = 'conjunction_assessment_results.pkl'
+# print(f"Conjunction assessment results saved to {result_file}")
 
-with open(output_file, 'wb') as file:
-    pickle.dump(result, file)
+# # # Load the result file for the next function
+# with open(result_file, 'rb') as file:
+#     loaded_result = pickle.load(file)
 
-print(f"Results saved to {output_file}")
+# processing_results_gaussian(loaded_result, rso_catalog, ID)
 
-
-# Filter out dictionaries with empty values
-filtered_result = [entry for entry in result if entry['Pc'] or entry['distance_at_tca']]
-
-# Save the filtered result list of dictionaries to a file
-filtered_output_file = 'filtered_conjunction_assessment_results.pkl'
-
-with open(filtered_output_file, 'wb') as file:
-    pickle.dump(filtered_result, file)
-
-print(f"Filtered results saved to {filtered_output_file}")
-print(filtered_result)
+plot_3D_orbits(rso_catalog , ID , result)

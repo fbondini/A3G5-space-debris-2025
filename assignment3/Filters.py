@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from tudatpy import astro
 from tudatpy import constants
 import ConjunctionUtilities
+from Testing import*
 
 import TudatPropagator 
 
@@ -24,6 +25,9 @@ mu = 3.986004418e14  # Earth's gravitational parameter (m^3/s^2)
 Re = 6378137  # Earth's radius (m)
 omega_e = 7.2921159e-5  # Earth's rotation rate (rad/s)
 from scipy.constants import g as g0, R as R_universal
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.patches import Ellipse
+from matplotlib.transforms import Affine2D
 R_specific = R_universal / 0.0289644  # Specific gas constant for air (J/(kg·K))
 def atmospheric_density(a ,e ,v):
     """
@@ -165,13 +169,13 @@ def perigee_apogee_filter(rso_catalog, D, ID_ref):
 
     kepler = astro.element_conversion.cartesian_to_keplerian(state_ref, 3.986004415e14)
 
-    # da, de, di, dOmega, domega = orbital_elements_rate(kepler[0], kepler[1], kepler[2], kepler[4],B_ref)
+    da, de, di, dOmega, domega , dM= orbital_elements_rate(kepler[0], kepler[1], kepler[2], kepler[4],B_ref)
 
-    # print(f"Variation in semi-major axis (da): {da * 2 * constants.JULIAN_DAY}")
-    # print(f"Variation in eccentricity (de): {de * 2 * constants.JULIAN_DAY}")
-    # print(f"Variation in inclination (di): {di * 2 * constants.JULIAN_DAY}")
-    # print(f"Variation in RAAN (dOmega): {dOmega * 2 * constants.JULIAN_DAY}")
-    # print(f"Variation in argument of perigee (domega): {domega * 2 * constants.JULIAN_DAY}")
+    print(f"Variation in semi-major axis (da): {da * 2 * constants.JULIAN_DAY}")
+    print(f"Variation in eccentricity (de): {de * 2 * constants.JULIAN_DAY}")
+    print(f"Variation in inclination (di): {di * 2 * constants.JULIAN_DAY}")
+    print(f"Variation in RAAN (dOmega): {dOmega * 2 * constants.JULIAN_DAY}")
+    print(f"Variation in argument of perigee (domega): {domega * 2 * constants.JULIAN_DAY}")
 
     ae_ref = [kepler[0], kepler[1]]
 
@@ -189,8 +193,19 @@ def perigee_apogee_filter(rso_catalog, D, ID_ref):
 
     for i in range(len(IDs)):
         if list(IDs)[i] != ID_ref:
+            print(list(IDs)[i])
             states[i,:] = np.array(rso_catalog[list(IDs)[i]]['state']).flatten()  # Get the state of ALL the other objects
             kepler = astro.element_conversion.cartesian_to_keplerian(states[i,:], 3.986004415e14)
+             
+
+            da, de, di, dOmega, domega , dM = orbital_elements_rate(kepler[0], kepler[1], kepler[2], kepler[4],B_ref)
+
+            print(f"Variation in semi-major axis (da): {da * 2 * constants.JULIAN_DAY}")
+            print(f"Variation in eccentricity (de): {de * 2 * constants.JULIAN_DAY}")
+            print(f"Variation in inclination (di): {di * 2 * constants.JULIAN_DAY}")
+            print(f"Variation in RAAN (dOmega): {dOmega * 2 * constants.JULIAN_DAY}")
+            print(f"Variation in argument of perigee (domega): {domega * 2 * constants.JULIAN_DAY}")
+
             ae[i, : ] = [kepler[0] , kepler[1]]
             Rp[i] = ae[i,0]*(1 - ae[i,1])
             Ra[i] = ae[i,0]*(1 + ae[i,1])
@@ -772,7 +787,7 @@ def mahalanobis_distance(X1, P1, X2, P2):
     return distance
 def conjunction_assessment(rso_catalog,D, ID , padding = 30e3, treshold = 5e3):
 
-    ### FILTERING OF THE CATALOG ###
+    # ### FILTERING OF THE CATALOG ###
 
     F1_ids = perigee_apogee_filter(rso_catalog , padding , ID)
 
@@ -795,7 +810,7 @@ def conjunction_assessment(rso_catalog,D, ID , padding = 30e3, treshold = 5e3):
     print(f"Number of objects after filtering: {N}")
 
     ### SOME objects will survive. Procede computing the TCA(s) using a spherical screening volume...the latter may be output of a function (?)
-        
+
     rso_catalog = filtered_rso_catalog_2
     ids = rso_catalog.keys()
     state_ref = rso_catalog[ID]['state']
@@ -838,6 +853,7 @@ def conjunction_assessment(rso_catalog,D, ID , padding = 30e3, treshold = 5e3):
     )
     T = np.zeros((100, 100)) 
     rho = np.zeros((100, 100))
+    Id = np.zeros(100)
 
     t_range = [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY]
     for i in range(len(rso_catalog)):
@@ -867,39 +883,50 @@ def conjunction_assessment(rso_catalog,D, ID , padding = 30e3, treshold = 5e3):
             n = len(T_list)
             T[i, 0:n ] = T_list
             rho[i, 0:n ] = rho_list
+            Id[i] = id
 
-    #Save the results to a .dat file
-    with open('T_rho_results_screen.dat', 'w') as file:
+    # Save the results to a .dat file
+    with open('T_rho_results_CMD.dat', 'w') as file:
         for i in range(T.shape[0]):
             for j in range(T.shape[1]):
                 if T[i, j] != 0 or rho[i, j] != 0:  # Avoid saving uninitialized values
-                    file.write(f"{i}\t{j}\t{T[i, j]}\t{rho[i, j]}\n")
+                    file.write(f"{i}\t{j}\t{Id[i]}\t{T[i, j]}\t{rho[i, j]}\n")
 
-    # Of all the different TCA, save the index that violates the treshold, and print their value...
-
-    # Loop through the indices of violating objects
-    # Read the file T_rho_results_1.dat and retrieve T and rho
+    # Initialize T and rho arrays for storing results
     T = np.zeros((N, 30))
     rho = np.zeros((N, 30))
 
     try:
-        with open('T_rho_results_screen.dat', 'r') as file:
+        # Read the file T_rho_results_CMD.dat and retrieve T, rho, and Id
+        with open('T_rho_results_CMD.dat', 'r') as file:
             for line in file:
-                i, j, T_val, rho_val = map(float, line.split())
+                i, j, id_val, T_val, rho_val = line.split()
                 i, j = int(i), int(j)
-                T[i, j] = T_val
-                rho[i, j] = rho_val
+                T[i, j] = float(T_val)
+                rho[i, j] = float(rho_val)
+                Id[i] = float(id_val)
     except FileNotFoundError:
-        print("File T_rho_results_screen.dat not found.")
+        print("File T_rho_results_CMD.dat not found.")
     result = []
     for i in range(N):
         Pc_tot = []
         Uc_tot = []
         euclidean_dist = []
         mahalanobius_dist = []
+        POS = []
+        VEL = []
+        close_time_TDB = []
+        Pf_primary = []
+        Pf_secondary = []
+        X_f_rel = []
+        X1 = []
+        X2 = []
         if any(rho[i, :] < treshold):  # Check if any rho value for this object is below the threshold
-            violating_id = list(ids)[i]
+
+            violating_id = Id[i]  # Take the Id of the violating object
+
             for j in range(T.shape[1]):
+
                 if rho[i, j] != 0 and rho[i, j] < treshold:  # Check if this specific rho value violates the threshold
                     encounter_time = T[i, j]
                     ## Lets compute some collision probability! 
@@ -930,23 +957,160 @@ def conjunction_assessment(rso_catalog,D, ID , padding = 30e3, treshold = 5e3):
                     r2 = np.sqrt(area_2/(4*np.pi))
 
                     HBR = r1 + r2
+                    X_f_relative = Xf_2 - Xf_1
+                    X_f_pos_RIC = ConjunctionUtilities.eci2ric(Xf_1[:3], Xf_1[3:6], X_f_relative[:3])
+
+                    X_f_vel_RIC = ConjunctionUtilities.eci2ric(Xf_1[:3], Xf_1[3:6], X_f_relative[3:6])
 
                     Pc_i = ConjunctionUtilities.Pc2D_Foster(Xf_1 , Pf_1, Xf_2 , Pf_2 , HBR)
+
                     Uc2D_i = ConjunctionUtilities.Uc2D(Xf_1 , Pf_1, Xf_2 , Pf_2 , HBR)
+
                     distance_at_tca = np.linalg.norm(Xf_1[:3] - Xf_2[:3])
-                    mahalanobius_dist_at_tca = mahalanobis_distance(Xf_1 , Pf_1,Xf_2 , Pf_2)
+                
+                    mahalanobius_dist_at_tca = mahalanobis_distance(Xf_1 , Pf_1, Xf_2 , Pf_2)
+
+                  
+                    close_time_TDB.append(encounter_time)
+
+                    # Convert time to calendar UTC
+
+                    close_time_TT = astro.time_conversion.TDB_to_TT(encounter_time , Xf_2[:3])
+
+                    close_time_TAI = close_time_TT - 32.184 
+
+                    close_time_UTC = close_time_TAI - 37
+
+                    UTC_datetime = astro.time_conversion.date_time_from_epoch(encounter_time)
+
+                    year = UTC_datetime.year
+                    month = UTC_datetime.month
+                    day = UTC_datetime.day
+                    hour = UTC_datetime.hour
+                    minute = UTC_datetime.minute
+                    seconds = UTC_datetime.seconds
+
+                    formatted_date = f"{year:04d}-{month:02d}-{day:02d}"
+                    formatted_time = f"{hour:02d}:{minute:02d}:{seconds:06.3f}"
+
+                    # Print the complete calendar date and time in a readable format
+                    print(f"Calendar Date and Time: {formatted_date} {formatted_time}")
+
+     
+
+
+                    Pf_primary.append(Pf_1)
+
+                    Pf_secondary.append(Pf_2)
+
                     Pc_tot.append(Pc_i)
+
                     Uc_tot.append(Uc2D_i)
+
                     euclidean_dist.append(distance_at_tca)
+
                     mahalanobius_dist.append(mahalanobius_dist_at_tca)
-            results_dict = {
-                "id": violating_id,
-                "Pc": Pc_tot,
-                "distance_at_tca": euclidean_dist,
-                "mahalanobis_distance": mahalanobius_dist,
-                "Uc":Uc_tot
-            }
-            result.append(results_dict)
+
+                    POS.append(X_f_pos_RIC)
+
+                    VEL.append(X_f_vel_RIC)
+
+                    X_f_rel.append(X_f_relative)
+
+                    X1.append(Xf_1)
+                    X2.append(Xf_2)
+                    print("I am here")
+                    if np.abs(X_f_pos_RIC[0]) < 200 and mahalanobius_dist_at_tca < 4.6 and distance_at_tca < 1e3:
+                        if Uc2D_i > 1e-4:
+                            print(f"The object {violating_id} is an HIE, Delande")
+                            print(f"Uc = {Uc2D_i}")
+                            print(f"Pc = {Pc_i}")
+                            print(f"Distance at TCA {distance_at_tca}")
+                            print(f"Mahalanobis distance at TCA {mahalanobius_dist_at_tca}")
+                            print(f"Close approach TDB : {encounter_time}")
+                            print(f"Radial Distance with primary: {X_f_pos_RIC[0]} ")
+                            print(f"RIC position: { X_f_pos_RIC}")
+                            print(f"RIC velocity: { X_f_vel_RIC}")
+                            print(f"Appending results for object {violating_id}...")
+                            results_dict = {
+                                violating_id: {
+                                    "Pc": Pc_tot,
+                                    "distance_at_tca": euclidean_dist,
+                                    "mahalanobis_distance": mahalanobius_dist,
+                                    "Uc": Uc_tot,
+                                    "Pos_RIC": POS,
+                                    "Vel_RIC": VEL,
+                                    "close_time_TDB": close_time_TDB,
+                                    "Pf_primary": Pf_primary,
+                                    "Pf_secondary": Pf_secondary,
+                                    "X_f_rel": X_f_rel,
+                                    "X1":X1,
+                                    "X2": X2,
+                                }
+                            }
+                            result.append(results_dict)
+                        else: 
+                            print(f"The object {violating_id} is NOT an HIE, just CDM")
+                            print(f"Uc = {Uc2D_i}")
+                            print(f"Pc = {Pc_i}")
+                            print(f"Distance at TCA {distance_at_tca}")
+                            print(f"Close approach TDB : {encounter_time}")
+                            print(f"Radial Distance with primary: {X_f_pos_RIC[0]} ")
+                            print(f"RIC position: { X_f_pos_RIC}")
+                            print(f"RIC velocity: { X_f_vel_RIC}")
+                            print(f"Mahalanobis distance at TCA {mahalanobius_dist_at_tca}")
+
+                    elif np.abs(X_f_pos_RIC[0]) < 200 and mahalanobius_dist_at_tca > 4.6 and distance_at_tca < 1e3:
+                        if Pc_i > 1e-4:
+                            print(f"The object {violating_id} is an HIE, Foster")
+                            print(f"Uc = {Uc2D_i}")
+                            print(f"Pc = {Pc_i}")
+                            print(f"Distance at TCA {distance_at_tca}")
+                            print(f"Mahalanobis distance at TCA {mahalanobius_dist_at_tca}")
+                            print(f"Close approach TDB : {encounter_time}")
+                            print(f"Radial Distance with primary: {X_f_pos_RIC[0]} ")
+                            print(f"RIC position: { X_f_pos_RIC}")
+                            print(f"RIC velocity: { X_f_vel_RIC}")
+                            print(f"Appending results for object {violating_id}...")
+                            results_dict = {
+                                violating_id: {
+                                    "Pc": Pc_tot,
+                                    "distance_at_tca": euclidean_dist,
+                                    "mahalanobis_distance": mahalanobius_dist,
+                                    "Uc": Uc_tot,
+                                    "Pos_RIC": POS,
+                                    "Vel_RIC": VEL,
+                                    "close_time_TDB": close_time_TDB,
+                                    "Pf_primary": Pf_primary,
+                                    "Pf_secondary": Pf_secondary,
+                                    "X_f_rel": X_f_rel,
+                                    "X1":X1,
+                                    "X2": X2,
+                                }
+                            }
+                            result.append(results_dict)
+                        else:
+                            print(f"The object {violating_id} is NOT an HIE, just CDM")
+                            print(f"Uc = {Uc2D_i}")
+                            print(f"Pc = {Pc_i}")
+                            print(f"Distance at TCA {distance_at_tca}")
+                            print(f"Close approach TDB : {encounter_time}")
+                            print(f"Radial Distance with primary: {X_f_pos_RIC[0]} ")
+                            print(f"RIC position: { X_f_pos_RIC}")
+                            print(f"RIC velocity: { X_f_vel_RIC}")
+                            print(f"Mahalanobis distance at TCA {mahalanobius_dist_at_tca}")
+                    else: 
+                        print(f"The object {violating_id} is NOT an HIE, just CDM")
+                        print(f"Uc = {Uc2D_i}")
+                        print(f"Pc = {Pc_i}")
+                        print(f"Distance at TCA {distance_at_tca}")
+                        print(f"Close approach TDB : {encounter_time}")
+                        print(f"Radial Distance with primary: {X_f_pos_RIC[0]} ")
+                        print(f"RIC position: { X_f_pos_RIC}")
+                        print(f"RIC velocity: { X_f_vel_RIC}")
+                        print(f"Mahalanobis distance at TCA {mahalanobius_dist_at_tca}")
+
+
     return result
 
 
@@ -1024,7 +1188,8 @@ def screening_volume(rso_catalog , ID , filtered_ids = []):
             for j in range(len(X_rel[:, 0])):
                 X_ric = ConjunctionUtilities.eci2ric(X_hist[j, 0:3], X_hist[j, 3:6], X_rel[j, :3])
 
-                if abs(X_ric[0]) < 5000 and abs(X_ric[1]) < 10e3 and abs(X_ric[2]) < 5000:
+                ellipsoid_check = (X_ric[0] / 2e3)**2 + (X_ric[1] / 25e3)**2 + (X_ric[2] / 25e3)**2
+                if ellipsoid_check < 1:
                     counter += 1
             if counter > 0:
                 print(f"The object {id} entered the screening volume for {counter * step} seconds.")
@@ -1032,3 +1197,547 @@ def screening_volume(rso_catalog , ID , filtered_ids = []):
 
 
     return filtered_ids
+
+
+
+def processing_results_gaussian(result, rso_full_catalog, ID_ref):
+    """
+    Process the results of conjunction analysis and visualize the Gaussian distribution of the results.
+
+    Parameters:
+    ID : str
+        ID of the primary object.
+    result : list
+        List of dictionaries containing conjunction analysis results.
+    rso_full_catalog : dict
+        Full catalog of RSOs with their states and covariances.
+    ID_ref : str
+        Reference ID for the primary object.
+
+    Returns:
+    None
+    """
+    import matplotlib.pyplot as plt
+
+
+    Pc = []
+    distance_at_tca = []
+    mahalanobis_distance = []
+    Uc = []
+    Pos_RIC = []
+    Vel_RIC = []
+    close_time_TDB = []
+    Pf_primary = []
+    Pf_secondary = []
+    object_ids = []
+    X_f_rel = []
+
+    for result_dict in result:
+        for obj_id, metrics in result_dict.items():
+            print(obj_id)
+            object_ids.append(obj_id)
+            for key, value in metrics.items():
+                if key == "Pc":
+                    Pc.append(value)
+                elif key == "distance_at_tca":
+                    distance_at_tca.append(value)
+                elif key == "mahalanobis_distance":
+                    mahalanobis_distance.append(value)
+                elif key == "Uc":
+                    Uc.append(value)
+                elif key == "Pos_RIC":
+                    Pos_RIC.append(value)
+                elif key == "Vel_RIC":
+                    Vel_RIC.append(value)
+                elif key == "close_time_TDB":
+                    close_time_TDB.append(value)
+                elif key == "Pf_primary":
+                    Pf_primary.append(value)
+                elif key == "Pf_secondary":
+                    Pf_secondary.append(value)
+                elif key == "X_f_rel":
+                    X_f_rel.append(value)
+                    
+    print(Pos_RIC[1])
+    print(close_time_TDB)
+    for i in range(len(object_ids)):
+        print(i)
+        violating_id = object_ids[i]
+        print(f"Processing object {violating_id}...")
+
+        current_Pc = Pc[i]
+        current_distance_at_tca = distance_at_tca[i]
+        current_mahalanobis_distance = mahalanobis_distance[i]
+        current_Uc = Uc[i]
+        current_Pos_RIC = Pos_RIC[i]
+        current_Vel_RIC = Vel_RIC[i]
+        current_close_time_TDB = close_time_TDB[i]
+        current_Pf_primary = Pf_primary[i]
+        current_Pf_secondary = Pf_secondary[i]
+        X_f_rel_i = X_f_rel[i]
+
+        # Convert lists to numpy arrays for easier manipulation
+        Pci = np.array(current_Pc)
+        distance_at_tcai = np.array(current_distance_at_tca)
+        mahalanobis_distancei = np.array(current_mahalanobis_distance)
+        Uci = np.array(current_Uc)
+        Pos_RICi = np.array(current_Pos_RIC)
+        Vel_RICi = np.array(current_Vel_RIC)
+        close_time_TDBi = np.array(current_close_time_TDB)
+        Pf_primaryi = np.array(current_Pf_primary)
+        Pf_secondaryi = np.array(current_Pf_secondary)
+        X_f_reli = np.array(X_f_rel_i)
+  
+       
+
+
+
+        # Compute relative state and covariance in RIC frame
+        relative_position = np.array(Pos_RICi).flatten()
+        relative_velocity = np.array(Vel_RICi).flatten()
+
+        relative_position_ECI = np.array(X_f_reli[0:3]).flatten()
+
+        relative_velocity_ECI = np.array(X_f_reli[3:6]).flatten()
+
+        combined_covariance = Pf_primaryi[0][:3, :3] + Pf_secondaryi[0][:3, :3]
+
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(0, 0, 0, color='red', label='Primary Object (Reference Body)')
+        ax.scatter(relative_position_ECI[0] , relative_position_ECI[1], relative_position_ECI[2], color='blue', label='Secondary Object (Relative Position)')
+
+        # Plot the ellipsoid centered at the reference body
+        plot_sigma_ellipsoid(ax, Pf_primaryi[0][:3, :3], np.zeros(3), label='Uncertainty Ellipsoid', color='red')
+        plot_sigma_ellipsoid(ax, Pf_secondaryi[0][:3, :3], relative_position_ECI, label='Uncertainty Ellipsoid', color='cyan')
+
+
+        
+
+        # Plot 3D ellipsoid for the combined covariance centered at the reference body
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(0, 0, 0, color='red', label='Primary Object (Reference Body)')
+        ax.scatter(relative_position[0] , relative_position[1], relative_position[2], color='blue', label='Secondary Object (Relative Position)')
+
+        # Plot the ellipsoid centered at the reference body
+        plot_sigma_ellipsoid(ax, combined_covariance, np.zeros(3), label='Uncertainty Ellipsoid', color='cyan')
+
+        # Plot a cylinder along the relative velocity vector
+        relative_velocity_unit = relative_velocity / np.linalg.norm(relative_velocity)
+        cylinder_length = 10000  # Length of the cylinder in meters
+        cylinder_radius = np.sqrt(100 / np.pi)  # Radius of the cylinder (A = 1)
+
+        # Generate cylinder points
+        theta = np.linspace(0, 2 * np.pi, 100)
+        z = np.linspace(-cylinder_length / 2, cylinder_length / 2, 50)
+        theta_grid, z_grid = np.meshgrid(theta, z)
+        x_grid = cylinder_radius * np.cos(theta_grid)
+        y_grid = cylinder_radius * np.sin(theta_grid)
+
+        # Rotate and translate the cylinder to align with the relative velocity vector
+        cylinder_points = np.array([x_grid.flatten(), y_grid.flatten(), z_grid.flatten()])
+        rotation_matrix = np.linalg.svd(np.outer(relative_velocity_unit, [0, 0, 1]))[0]
+        rotated_cylinder_points = rotation_matrix @ cylinder_points
+        x_rotated = rotated_cylinder_points[0, :].reshape(x_grid.shape)
+        y_rotated = rotated_cylinder_points[1, :].reshape(y_grid.shape)
+        z_rotated = rotated_cylinder_points[2, :].reshape(z_grid.shape)
+
+        # Translate the cylinder to the relative position
+        x_translated = x_rotated + relative_position[0]
+        y_translated = y_rotated + relative_position[1]
+        z_translated = z_rotated + relative_position[2]
+
+        # Plot the cylinder
+        ax.plot_surface(x_translated, y_translated, z_translated, color='orange', alpha=0.5, label='Collision Cylinder')
+        
+
+        # Add labels and legend
+        ax.set_xlabel('X (m)')
+        ax.set_ylabel('Y (m)')
+        ax.set_zlabel('Z (m)')
+        ax.legend()
+        ax.set_title(f"Conjunction Analysis for Object {violating_id}")
+        plt.show()
+
+        # 2D visualization in relative frame
+        fig2, ax2 = plt.subplots(figsize=(8, 8))
+        ellipse = Ellipse((relative_position[0], relative_position[2]),
+                          width=6 * np.sqrt(combined_covariance[0, 0]),
+                          height=6 * np.sqrt(combined_covariance[2, 2]),
+                          edgecolor='blue', facecolor='cyan', alpha=0.5)
+        ax2.add_patch(ellipse)
+        ax2.scatter(0, 0, color='red', label='Primary Object')
+        ax2.scatter(relative_position[0], relative_position[2], color='blue', label='Secondary Object')
+        ax2.set_xlabel('X (m)')
+        ax2.set_ylabel('Z (m)')
+        ax2.set_title(f"2D Conjunction Visualization for Object {violating_id}")
+        ax2.legend()
+        ax2.axis('equal')
+    
+
+        # Save plots
+        plt.savefig(f"conjunction_3d_{violating_id}.png")
+        plt.savefig(f"conjunction_2d_{violating_id}.png")
+        plt.show()
+        plt.close(fig)
+        plt.close(fig2)
+
+
+    print("Processing and visualization completed.")
+
+
+def population_analysis( complete_rso , apogee_rso , time_rso , ID):
+
+    a = []
+    e = []
+    a_ap = []
+    e_ap = []
+    a_time = []
+    e_time = []
+
+    IDs_total = complete_rso.keys()
+    IDs_apogee = apogee_rso.keys()
+    IDs_time = time_rso.keys()
+   
+    state_ref = complete_rso[ID]['state']
+
+
+    kepler_ref = astro.element_conversion.cartesian_to_keplerian(state_ref, 3.986004415e14)
+
+    a.append(kepler_ref[0])
+    e.append(kepler_ref[1])
+    
+    # Cycle for total
+    for id in IDs_total:
+        if id !=ID:
+            state_i = complete_rso[id]['state']
+
+            kepler_i = astro.element_conversion.cartesian_to_keplerian(state_i, 3.986004415e14)
+
+            a.append(kepler_i[0])
+            e.append(kepler_i[1])
+
+    for id in IDs_time:
+        if id !=ID:
+            state_i = time_rso[id]['state']
+
+            kepler_i = astro.element_conversion.cartesian_to_keplerian(state_i, 3.986004415e14)
+
+            a_time.append(kepler_i[0])
+            e_time.append(kepler_i[1])
+
+    for id in IDs_apogee:
+        if id !=ID:
+            state_i = apogee_rso[id]['state']
+
+            kepler_i = astro.element_conversion.cartesian_to_keplerian(state_i, 3.986004415e14)
+
+            a_ap.append(kepler_i[0])
+            e_ap.append(kepler_i[1])
+    #### Now we plot
+    plot_population_analysis(a , e , a_ap , e_ap , a_time , e_time , kepler_ref)
+
+    return
+def plot_population_analysis(a, e, a_ap, e_ap, a_time, e_time, kepler_ref):
+    plt.figure(figsize=(10, 7))
+
+    # Plot the complete catalog
+    plt.scatter(a, e, label='Flitered by apogee-perigee filter', alpha=1)
+
+    #Plot the apogee catalog
+    plt.scatter(a_ap, e_ap, label='Remaining Objects', alpha=1)
+
+    # # Plot the time catalog
+    #plt.scatter(a_time, e_time)# label='Remainig catalog', alpha=1)
+
+    # Plot the reference element with a clear marker
+    plt.scatter(kepler_ref[0], kepler_ref[1], color='red', label='NORAD ID = 40697', marker='X', s=50)
+
+
+    # Add labels and legend with increased font size
+    plt.xlabel('Semi-major Axis (m)', fontsize=16 , fontweight = 'bold')
+    plt.ylabel('Eccentricity (-)', fontsize=16 , fontweight = 'bold')
+    plt.yscale('log')
+    plt.xscale('log')
+
+    # Customizing the legend
+    plt.legend(fontsize=15)
+
+    # Adding a black box around the plot
+    plt.gca().spines['top'].set_color('black')
+    plt.gca().spines['right'].set_color('black')
+    plt.gca().spines['bottom'].set_color('black')
+    plt.gca().spines['left'].set_color('black')
+    plt.gca().spines['top'].set_linewidth(2.5)
+    plt.gca().spines['right'].set_linewidth(2.5)
+    plt.gca().spines['bottom'].set_linewidth(2.5)
+    plt.gca().spines['left'].set_linewidth(2.5)
+
+    # Increase tick label size
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+
+    plt.grid(True)
+    plt.show()
+
+
+def population_close_approach(complete_rso , TCA_values, ID):
+    a = []
+    e = []
+    
+    IDs_total = complete_rso.keys()
+    
+    state_ref = complete_rso[ID]['state']
+
+
+    kepler_ref = astro.element_conversion.cartesian_to_keplerian(state_ref, 3.986004415e14)
+
+    # Cycle for total
+    for id in IDs_total:
+        if id !=ID:
+            state_i = complete_rso[id]['state']
+
+            kepler_i = astro.element_conversion.cartesian_to_keplerian(state_i, 3.986004415e14)
+
+            a.append(kepler_i[0])
+            e.append(kepler_i[1])
+
+    plot_population_analysis_TCA(a ,e , TCA_values , kepler_ref)
+
+    return
+
+def plot_population_analysis_TCA(a, e, TCA, kepler_ref):
+    plt.figure(figsize=(10, 7))
+ # Plot the complete catalog with colormap for TCA distance
+    scatter = plt.scatter(a, e, c=TCA, cmap='viridis', alpha=1, label='Filtered by apogee-perigee filter')
+
+    # Plot the reference element with a clear marker
+    plt.scatter(kepler_ref[0], kepler_ref[1], color='red', label='NORAD ID = 40697', marker='X', s=100)
+
+    # Add colorbar for TCA distance
+    cbar = plt.colorbar(scatter)
+    cbar.set_label('TCA Distance (km)', fontsize=16, fontweight='bold')
+
+    # Add labels and legend with increased font size
+    plt.xlabel('Semi-major Axis (m)', fontsize=16, fontweight='bold')
+    plt.ylabel('Eccentricity (-)', fontsize=16, fontweight='bold')
+    plt.yscale('log')
+    plt.xscale('log')
+
+    # Customizing the legend
+    plt.legend(fontsize=15)
+
+    # Adding a black box around the plot
+    plt.gca().spines['top'].set_color('black')
+    plt.gca().spines['right'].set_color('black')
+    plt.gca().spines['bottom'].set_color('black')
+    plt.gca().spines['left'].set_color('black')
+    plt.gca().spines['top'].set_linewidth(2.5)
+    plt.gca().spines['right'].set_linewidth(2.5)
+    plt.gca().spines['bottom'].set_linewidth(2.5)
+    plt.gca().spines['left'].set_linewidth(2.5)
+
+    # Increase tick label size
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+
+    plt.grid(True)
+    plt.show()
+
+def extract_second_column(file_path):
+    second_column = []
+    with open(file_path, 'r') as file:
+        for line in file:
+            values = line.split()
+            if len(values) >= 2:  # Ensure the line has at least two elements
+                second_column.append(float(values[1]))  # Convert to float for numerical use
+    return second_column
+
+
+def full_catalog_analysis(rso_catalog):
+    LEO_id = []
+    MEO_id = []
+    GEO_id = []
+    HEO_id = []
+
+    IDs_total = rso_catalog.keys()
+
+    for id in IDs_total:
+        state = rso_catalog[id]['state']
+        kepler = astro.element_conversion.cartesian_to_keplerian(state, 3.986004415e14)
+
+        a = kepler[0] / 1000  # Convert from meters to kilometers
+        e = kepler[1]
+
+        # Classifying based on semi-major axis and eccentricity
+        if e >= 0.25:
+            HEO_id.append(id)
+        elif a < 8378:
+            LEO_id.append(id)
+        elif 8378 <= a < 35786:
+            MEO_id.append(id)
+        elif 42164 - 200 <= a <= 42164 + 200 and e < 0.1:
+            GEO_id.append(id)
+    
+    return LEO_id, MEO_id, GEO_id, HEO_id
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import numpy as np
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+from PIL import Image
+import matplotlib.image as mpimg
+
+def plot_3D_orbits(rso_catalog, ID, result):
+    
+
+    close_time_TDB = []
+    Xf_1 = []
+    Xf_2 = []
+    obj_Id = []
+
+    for result_dict in result:
+        for obj_id, metrics in result_dict.items():
+            obj_Id.append(obj_id)
+            for key, value in metrics.items():
+                if key == "close_time_TDB":
+                    close_time_TDB.append(value)
+                elif key == "X1":
+                    Xf_1.append(value)
+                elif key == "X2":
+                    Xf_2.append(value)
+
+    int_params = dict(
+        tudat_integrator='rkf78',
+        step=-10,
+        max_step=1000,
+        min_step=1e-3,
+        rtol=1e-12,
+        atol=1e-12
+    )
+
+    Cd_1 = rso_catalog[ID]['Cd']
+    Cr_1 = rso_catalog[ID]['Cr']
+    area_1 = rso_catalog[ID]['area']
+    mass_1 = rso_catalog[ID]['mass']
+
+    sph_deg = 8
+    sph_ord = 8
+    central_bodies = ['Earth']
+    bodies_to_create = ['Earth', 'Sun', 'Moon']
+
+    state_params_ref = dict(
+        central_bodies=central_bodies,
+        bodies_to_create=bodies_to_create,
+        mass=mass_1,
+        area=area_1,
+        Cd=Cd_1,
+        Cr=Cr_1,
+        sph_deg=sph_deg,
+        sph_ord=sph_ord
+    )
+
+    for id in obj_Id:
+        # Find the index and make sure it is an integer
+        i = np.where(obj_Id == id)[0][0]
+        
+        # Convert the result to a NumPy array to ensure numerical operations work
+        TCA_epochi = np.array(close_time_TDB[i])
+        print(TCA_epochi)
+        
+        # Subtract 1 hour (3600 seconds) from the TCA epoch
+        TCA_epochi_fin = TCA_epochi - 0.8* 3600
+        
+        # Convert the state values to NumPy arrays
+        state_2 = np.array(Xf_2[i])
+        state_2 = np.squeeze(state_2)
+        state_ref = np.array(Xf_1[i])
+        state_ref = np.squeeze(state_ref)
+        Cd_2 = rso_catalog[id]['Cd']
+        Cr_2 = rso_catalog[id]['Cr']
+        area_2 = rso_catalog[id]['area']
+        mass_2 = rso_catalog[id]['mass']
+
+        state_params_2 = dict(
+            central_bodies=central_bodies,
+            bodies_to_create=bodies_to_create,
+            mass=mass_2,
+            area=area_2,
+            Cd=Cd_2,
+            Cr=Cr_2,
+            sph_deg=sph_deg,
+            sph_ord=sph_ord
+        )
+        fig = plt.figure(figsize=(8, 8))
+        ax = fig.add_subplot(111, projection='3d')
+
+         # Plot the Earth with improved texture
+        plot_simple_earth(ax)
+
+        # Set equal scaling
+        ax.set_xlim([-7e6, 7e6])
+        ax.set_ylim([-7e6, 7e6])
+        ax.set_zlim([-7e6, 7e6])
+
+        # Set the font size and boldness
+        ax.set_xlabel('X [m]', fontsize=16, fontweight='bold')
+        ax.set_ylabel('Y [m]', fontsize=16, fontweight='bold')
+        ax.set_zlabel('Z [m]', fontsize=16, fontweight='bold')
+
+        # Set tick parameters
+        ax.tick_params(axis='both', which='major', labelsize=15)
+        ax.tick_params(axis='both', which='minor', labelsize=15)
+        ax.xaxis.get_offset_text().set_fontsize(14)
+        ax.yaxis.get_offset_text().set_fontsize(14)
+        ax.zaxis.get_offset_text().set_fontsize(14)
+
+    
+
+        # Add a black box around the 3D plot
+        for spine in ax.spines.values():
+            spine.set_edgecolor('black')
+            spine.set_linewidth(2)
+
+        # Propagate and plot the reference orbit
+        _, X_hist_ref = TudatPropagator.propagate_orbit(state_ref, [TCA_epochi, TCA_epochi_fin], state_params_ref, int_params)
+        X_ref = X_hist_ref
+        ax.plot(X_ref[:, 0], X_ref[:, 1], X_ref[:, 2], label=f'Orbit {int(ID)}', linewidth=3)
+
+        _, X_hist_2 = TudatPropagator.propagate_orbit(state_2, [TCA_epochi, TCA_epochi_fin], state_params_2, int_params)
+        X_2 = X_hist_2
+        ax.plot(X_2[:, 0], X_2[:, 1], X_2[:, 2], label=f'Orbit {int(id)}', linewidth=3)
+
+        ax.scatter(state_ref[0], state_ref[1], state_ref[2], s=30, c='r', label="HIE")
+
+        ax.legend(fontsize=14)
+        plt.show()
+    return
+
+
+
+def plot_simple_earth(ax, radius=3000.1e3, color='b'):
+    """
+    Plot a simple 3D Earth representation as a sphere.
+    
+    Parameters:
+    - ax: The matplotlib 3D axis object.
+    - radius: The radius of the Earth (in km).
+    - color: The color of the Earth.
+    """
+    # Generate sphere coordinates
+    u = np.linspace(0, 2 * np.pi, 100)
+    v = np.linspace(0, np.pi, 50)
+    x = radius * np.outer(np.cos(u), np.sin(v))
+    y = radius * np.outer(np.sin(u), np.sin(v))
+    z = radius * np.outer(np.ones(np.size(u)), np.cos(v))
+
+    # Plot the Earth as a sphere
+    ax.plot_surface(x, y, z, color=color, alpha=0.7, edgecolor='k')
+
+    # Set axis properties for a spherical appearance
+    ax.set_box_aspect([1, 1, 1])  # Equal scaling
+    ax.set_xlabel("X [m]")
+    ax.set_ylabel("Y [m]")
+    ax.set_zlabel("Z [m]")
+
