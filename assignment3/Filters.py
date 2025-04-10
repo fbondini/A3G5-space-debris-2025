@@ -857,6 +857,14 @@ def conjunction_assessment(rso_catalog, ID , padding = 30e3, treshold = 5e3):
         rtol = 1e-12,
         atol = 1e-12
     )
+    int_params2 = dict(
+        tudat_integrator = 'rkf78',
+        step = -10,
+        max_step = 1000,
+        min_step = 1e-3,
+        rtol = 1e-12,
+        atol = 1e-12
+    )
     T = np.zeros((100, 100)) 
     rho = np.zeros((100, 100))
     Id = np.zeros(100)
@@ -876,6 +884,8 @@ def conjunction_assessment(rso_catalog, ID , padding = 30e3, treshold = 5e3):
 
             mass_2 = rso_catalog[id]['mass']
 
+            tdb_epoch_2 = rso_catalog[id]['epoch_tdb']
+
             state_params_2 = dict(
             central_bodies = central_bodies , 
             bodies_to_create = bodies_to_create , 
@@ -884,6 +894,11 @@ def conjunction_assessment(rso_catalog, ID , padding = 30e3, treshold = 5e3):
             sph_deg = sph_deg , 
             sph_ord = sph_ord
             )
+
+            if tdb_epoch_2 != tdb_epoch:
+                _, X_hist_2_1 = TudatPropagator.propagate_orbit(state_2 , [tdb_epoch_2 , tdb_epoch], state_params_2, int_params2)
+                state_2 = X_hist_2_1[0 , :]
+
             T_list , rho_list = ConjunctionUtilities.compute_TCA(state_ref, state_2 , t_range, state_params_1 , state_params_2 , int_params, rho_min_crit = 5e3)
 
             n = len(T_list)
@@ -943,6 +958,8 @@ def conjunction_assessment(rso_catalog, ID , padding = 30e3, treshold = 5e3):
                     Cr_2 = rso_catalog[violating_id]['Cr']
                     area_2 = rso_catalog[violating_id]['area']
                     mass_2 = rso_catalog[violating_id]['mass']
+
+                    tdb_epoch_2 = rso_catalog[violating_id]['epoch_tdb']
 
                     state_params_2 = dict(
                     central_bodies = central_bodies , 
@@ -1178,6 +1195,8 @@ def screening_volume(rso_catalog , ID , filtered_ids = []):
 
             mass_2 = rso_catalog[id]['mass']
 
+            tdb_epoch_2 = rso_catalog[id]['epoch_tdb']
+
             state_params_2 = dict(
             central_bodies = central_bodies , 
             bodies_to_create = bodies_to_create , 
@@ -1186,7 +1205,32 @@ def screening_volume(rso_catalog , ID , filtered_ids = []):
             sph_deg = sph_deg , 
             sph_ord = sph_ord
             )
-            _, X_hist_2 = TudatPropagator.propagate_orbit(state_2 , [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY], state_params_2, int_params)
+
+            if tdb_epoch_2 != tdb_epoch:
+                    
+                int_params1 = dict(
+                tudat_integrator = 'rk4',
+                step = -1,
+                )
+
+                int_params2 = dict(
+                    tudat_integrator = 'rk4',
+                    step = 1,
+                )
+
+                _, X_hist_2_1 = TudatPropagator.propagate_orbit(state_2 , [tdb_epoch_2 , tdb_epoch], state_params_2, int_params1)
+
+                _, X_hist_2_2 = TudatPropagator.propagate_orbit(state_2 , [tdb_epoch_2 , tdb_epoch + 2*constants.JULIAN_DAY], state_params_2, int_params2)
+
+                X_hist_2= np.vstack((X_hist_2_1, X_hist_2_2))
+
+            else:
+                int_params = dict(
+                    tudat_integrator = 'rk4',
+                    step = 1,
+                )
+
+                _, X_hist_2 = TudatPropagator.propagate_orbit(state_2 , [tdb_epoch_2 , tdb_epoch_2 + 2*constants.JULIAN_DAY], state_params_2, int_params)
             # Compute the relative state vector
             X_rel = X_hist_2 - X_hist
             counter = 0
