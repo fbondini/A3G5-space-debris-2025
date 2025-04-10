@@ -193,18 +193,8 @@ def perigee_apogee_filter(rso_catalog, D, ID_ref):
 
     for i in range(len(IDs)):
         if list(IDs)[i] != ID_ref:
-            print(list(IDs)[i])
             states[i,:] = np.array(rso_catalog[list(IDs)[i]]['state']).flatten()  # Get the state of ALL the other objects
             kepler = astro.element_conversion.cartesian_to_keplerian(states[i,:], 3.986004415e14)
-             
-
-            da, de, di, dOmega, domega , dM = orbital_elements_rate(kepler[0], kepler[1], kepler[2], kepler[4],B_ref)
-
-            print(f"Variation in semi-major axis (da): {da * 2 * constants.JULIAN_DAY}")
-            print(f"Variation in eccentricity (de): {de * 2 * constants.JULIAN_DAY}")
-            print(f"Variation in inclination (di): {di * 2 * constants.JULIAN_DAY}")
-            print(f"Variation in RAAN (dOmega): {dOmega * 2 * constants.JULIAN_DAY}")
-            print(f"Variation in argument of perigee (domega): {domega * 2 * constants.JULIAN_DAY}")
 
             ae[i, : ] = [kepler[0] , kepler[1]]
             Rp[i] = ae[i,0]*(1 - ae[i,1])
@@ -220,8 +210,6 @@ def perigee_apogee_filter(rso_catalog, D, ID_ref):
                 Q = Ra_ref
             else:
                 Q = Ra[i]
-            
-            print(q-Q)
             ## Check if q - Q > D
             if np.abs(q-Q) > D:
                 print(f"Object {list(IDs)[i]} is filtered")
@@ -234,8 +222,6 @@ def perigee_apogee_filter(rso_catalog, D, ID_ref):
     print(f"Objects survived: {non_filtered_ids}")
     indices_non_filtered = [list(IDs).index(ID) for ID in non_filtered_ids]
     print(f"Indices of non-filtered objects: {indices_non_filtered}")
-    for index in indices_non_filtered:
-        print(f"Object {list(IDs)[index]}: Ra = {Ra[index]/1000 - 6371}, Rp = {Rp[index]/1000 - 6371}")
     return non_filtered_ids
 
 def geometric_filter():
@@ -785,7 +771,27 @@ def mahalanobis_distance(X1, P1, X2, P2):
     inv_combined_covariance = np.linalg.inv(combined_covariance)
     distance = np.sqrt(relative_position.T @ inv_combined_covariance @ relative_position)
     return distance
-def conjunction_assessment(rso_catalog,D, ID , padding = 30e3, treshold = 5e3):
+def conjunction_assessment(rso_catalog, ID , padding = 30e3, treshold = 5e3):
+    """
+    Process the RSO catalog file, providing filtering, screening, CDMs and HIEs of 
+    possible conjunctions with a given reference ID. The conjunction_assessment function first 
+    filters the catalogue using a simple apogee-perigee filter, then uses an elliptical screening volume to further reduce the
+    RSOs. Then a treshold of 5km is imposed to determine the possible CDMs, and, if other condtions are respected, of HIEs.
+
+    Parameters: 
+        rso_catalog : dict
+
+        ID : int
+
+        padding = 30e3 : pad used in the apogee-perigee filter
+
+        treshold = 5e3 : spherical volume used for CDMs detection
+    
+    Returns:
+
+        result: dict of all the HIEs
+    """
+
 
     # ### FILTERING OF THE CATALOG ###
 

@@ -27,35 +27,19 @@ rso_catalog =  data[0]
 ID = 40697  # ID of the to-defend-object
 
 
-F1_ids = perigee_apogee_filter(rso_catalog , 30e3 , 40697)
+# F1_ids = perigee_apogee_filter(rso_catalog , 40697)
 
-filtered_rso_catalog_Apogee = {key: rso_catalog[key] for key in F1_ids}
-
-
-population_analysis(rso_catalog , filtered_rso_catalog_Apogee  , filtered_rso_catalog_Apogee, ID)
+# filtered_rso_catalog_Apogee = {key: rso_catalog[key] for key in F1_ids}
 
 
-LEO_id, MEO_id, GEO_id, HEO_id = full_catalog_analysis(rso_catalog)
-print("LEO:", LEO_id)
-print("MEO:", MEO_id)
-print("GEO:", GEO_id)
-print("HEO:", HEO_id)
+# population_analysis(rso_catalog , filtered_rso_catalog_Apogee  , filtered_rso_catalog_Apogee, ID)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# LEO_id, MEO_id, GEO_id, HEO_id = full_catalog_analysis(rso_catalog)
+# print("LEO:", LEO_id)
+# print("MEO:", MEO_id)
+# print("GEO:", GEO_id)
+# print("HEO:", HEO_id)
 
 
 ids = rso_catalog.keys()
@@ -87,7 +71,7 @@ state_params_1 = dict(
 # Define integrator parameters = dict(step , max_step, min_step,rtol, atol, tudat_integrator)
 int_params = dict(
     tudat_integrator = 'rkf78',
-    step = 100,
+    step = 10,
     max_step = 3600,
     min_step = 1e-3,
     rtol = 1e-12,
@@ -101,7 +85,7 @@ t_range = [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY]
 
 
 
-result = conjunction_assessment(rso_catalog , 30e3, ID)
+result = conjunction_assessment(rso_catalog, ID)
 # # # # # # Save the result to a file for later access
 # result_file = 'conjunction_assessment_result.pkl'
 # with open(result_file, 'wb') as file:
