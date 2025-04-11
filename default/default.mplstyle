@@ -1,0 +1,22 @@
+figure.figsize: 6, 4
+axes.grid: True
+grid.linestyle: --
+grid.linewidth: 0.5
+grid.alpha: 0.7
+axes.spines.top: False
+axes.spines.right: False
+axes.labelsize: 14
+axes.labelpad: 8
+axes.titlesize: 15
+axes.titlepad: 12
+legend.fontsize: 12
+legend.frameon: True
+legend.edgecolor: gray
+lines.linewidth: 1.8
+lines.markersize: 6
+xtick.labelsize: 12
+ytick.labelsize: 12
+text.usetex: True
+font.family: serif
+font.serif: Libertine
+axes.prop_cycle: cycler('color', ["#004488", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#F0E442", "#882255", "#117733", "#332288"])
