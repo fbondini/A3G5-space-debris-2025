@@ -307,7 +307,7 @@ def get_perturbed_propagator_settings(
         Earth = 
         [
             propagation_setup.acceleration.spherical_harmonic_gravity(8, 8),
-            propagation_setup.acceleration.aerodynamic()
+            #propagation_setup.acceleration.aerodynamic()
         ],
          Moon = 
          [
@@ -473,6 +473,8 @@ def obj_fun(rg1, ra1, dec1, rg2, ra2, dec2, rotation_matrix_t1, rotation_matrix_
                 final_state_deviation = (
                     state_history[final_epoch] - lambert_history[final_epoch]
                 )
+
+                print(f"Final state deviation {final_state_deviation}")
 
                 
 
