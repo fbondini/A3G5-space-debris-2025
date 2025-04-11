@@ -62,7 +62,6 @@ def atmospheric_density(a ,e ,v):
 def height_from_radius(r):
     """
     Calculates the height above the Earth's surface given the radial distance.
-    Takes into account the ellipsoidal shape of the Earth.
     """
     Re_equator = 6378000  # Earth's equatorial radius (m)
    
