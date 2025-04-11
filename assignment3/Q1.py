@@ -26,7 +26,7 @@ except pickle.UnpicklingError:
 rso_catalog =  data[0]
 ID = 40697  # ID of the to-defend-object
 
-
+print(rso_catalog)
 # F1_ids = perigee_apogee_filter(rso_catalog , 40697)
 
 # filtered_rso_catalog_Apogee = {key: rso_catalog[key] for key in F1_ids}
@@ -100,3 +100,54 @@ result = conjunction_assessment(rso_catalog, ID)
 # processing_results_gaussian(loaded_result, rso_catalog, ID)
 
 plot_3D_orbits(rso_catalog , ID , result)
+
+
+
+
+##########################################
+
+# LETs define a framework for all the other c's: 
+# FOR Q3 and Q4 I can just modify the full catalog and run the entire thing again to see if there is 
+# a new possible collision.
+
+# THe only problem is apparently Q2, as the object 91159 will perform a maneuver in an epoch later than the initial one provided. 
+# The latter has already been analysed, and it will (without any maneuver), closely encounter the reference ID. 
+
+# Supposedly you get the delta-v at a certain epoch, with supposedly a modified state and covariance? 
+
+state_91159 = ...
+
+cov_91159 = ...
+
+epoch_tdb_91159 = ...
+
+# Those are the only thing that actually changes. In my opinion, the smart way of doing this is creating a catalog with just the object, and analyzing 
+# it from the start of the maneuver to the end of the 2 days time span. The time from the initial epoch to the maneuver itself will not be analyzed if 
+# the objects has not encountered the main object in that time span (which is the case, see report)
+
+result = conj_ass_Q2(rso_catalog , ID , 91159 , epoch_tdb_91159 , state_91159 , cov_91159) # To run (?)
+
+
+## For the rest, I dont really know what it should be the output but in general
+ID_q3 = 91662
+# Q3 
+Cd_new = ...
+Cr_new = ...
+mass_new = ...
+area_new = ...
+rso_catalog[ID_q3]['Cd'] = Cd_new
+rso_catalog[ID_q3]['Cr'] = Cr_new
+rso_catalog[ID_q3]['area'] = mass_new
+rso_catalog[ID_q3]['mass'] = area_new
+
+result_q3 = conjunction_assessment(rso_catalog , ID)
+
+
+#Q4 
+ID_q4 = 99005
+state_mean_new = ...
+cov_new = ...
+rso_catalog[ID_q4]['state'] = state_mean_new
+rso_catalog[ID_q4]['cov'] = cov_new
+
+result_q4 = conjunction_assessment(rso_catalog , ID)
