@@ -13,6 +13,7 @@ import numpy as np
 from tudatpy import constants, numerical_simulation
 from tudatpy.astro import element_conversion, two_body_dynamics
 from tudatpy.data import save2txt
+from tudatpy import astro
 from tudatpy.interface import spice
 from tudatpy.numerical_simulation import (
     environment,
@@ -299,20 +300,21 @@ def get_perturbed_propagator_settings(
 
     # Define accelerations acting on vehicle.
     acceleration_settings_on_spacecraft = dict( 
-         Sun = 
-         [
-             propagation_setup.acceleration.radiation_pressure(),
-             propagation_setup.acceleration.point_mass_gravity()
-         ],
+       #  Sun = 
+        #  [
+        #      propagation_setup.acceleration.radiation_pressure(),
+        #      propagation_setup.acceleration.point_mass_gravity()
+        #  ],
         Earth = 
         [
-            propagation_setup.acceleration.spherical_harmonic_gravity(8, 8),
+            propagation_setup.acceleration.point_mass_gravity(),
+            #propagation_setup.acceleration.spherical_harmonic_gravity(8, 8),
             #propagation_setup.acceleration.aerodynamic()
         ],
-         Moon = 
-         [
-             propagation_setup.acceleration.point_mass_gravity()
-        ],
+        #  Moon = 
+        #  [
+        #      propagation_setup.acceleration.point_mass_gravity()
+        # ],
     )
     
     # Create global accelerations dictionary.
@@ -467,7 +469,13 @@ def obj_fun(rg1, ra1, dec1, rg2, ra2, dec2, rotation_matrix_t1, rotation_matrix_
 
                 # Get final state transition matrix (and its inverse)
                 final_epoch = list(state_transition_matrix_history.keys())[-1]
+                initial_epoch = list(state_transition_matrix_history.keys())[1]
                 final_state_transition_matrix = state_transition_matrix_history[final_epoch]
+
+                kepler = astro.element_conversion.cartesian_to_keplerian(state_history[initial_epoch], mu_earth)
+
+                print(kepler[0])
+                print(kepler[1])
 
                 # Retrieve final state deviation
                 final_state_deviation = (
@@ -475,6 +483,7 @@ def obj_fun(rg1, ra1, dec1, rg2, ra2, dec2, rotation_matrix_t1, rotation_matrix_
                 )
 
                 print(f"Final state deviation {final_state_deviation}")
+                print(f"Time of Flight {tof}")
 
                 
 
