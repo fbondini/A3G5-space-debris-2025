@@ -46,6 +46,10 @@ spice.load_kernel(current_directory + "/assignment3/naif0012.tls")
 spice.load_kernel(current_directory + "/assignment3/pck00011.tpc")
 spice.load_kernel(current_directory + "/assignment3/earth_latest_high_prec.bpc")
 
+# earth_rotation_model = bodies.get("Earth").rotation_model
+# rotation_matrix_t1 = earth_rotation_model.body_fixed_to_inertial_rotation(epochs_tdb_et[0])
+# rotation_matrix_t2 = earth_rotation_model.body_fixed_to_inertial_rotation(epochs_tdb_et[1])
+
 rotation_matrix_t1 = spice.compute_rotation_matrix_between_frames("IAU_EARTH", "J2000", epochs_tdb_et[0])
 rotation_matrix_t2 = spice.compute_rotation_matrix_between_frames("IAU_EARTH", "J2000", epochs_tdb_et[1])
 

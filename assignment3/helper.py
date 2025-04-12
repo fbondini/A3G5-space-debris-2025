@@ -446,14 +446,14 @@ def tudat_initialize_bodies(bodies_to_create=[]):
 def obj_fun(rg1, ra1, dec1, rg2, ra2, dec2, rotation_matrix_t1, rotation_matrix_t2, epochs_tdb_et, mu_earth, tof, bodies, rgs):
 
 
-        # Initial and final position vectors (ECEF)
-        r1_ecef = position_vector(rg1, ra1, dec1, rgs)
-        r2_ecef = position_vector(rg2, ra2, dec2, rgs)
+        # Initial and final position vectors (ECI)
+        r1_eci = position_vector(rg1, ra1, dec1, rgs, rotation_matrix_t1)
+        r2_eci = position_vector(rg2, ra2, dec2, rgs, rotation_matrix_t2)
 
 
         # ECI position vectors
-        r1_eci = r1_ecef @ rotation_matrix_t1  # Use matrix multiplication (right multiplication)
-        r2_eci = r2_ecef @ rotation_matrix_t2  # Use matrix multiplication (right multiplication) 
+        # r1_eci = r1_ecef @ rotation_matrix_t1  # Use matrix multiplication (right multiplication)
+        # r2_eci = r2_ecef @ rotation_matrix_t2  # Use matrix multiplication (right multiplication) 
 
         v0_correction = np.zeros(3)
         delta_r_f_norm = np.inf
@@ -580,7 +580,7 @@ def obj_fun(rg1, ra1, dec1, rg2, ra2, dec2, rotation_matrix_t1, rotation_matrix_
     
 
 
-def position_vector(rg, ra, dec, r_gs):
+def position_vector(rg, ra, dec, r_gs , R1):
     """
     Calculate the position vector in ECEF coordinates from range, elevation, and right ascension.
     """
@@ -589,10 +589,11 @@ def position_vector(rg, ra, dec, r_gs):
         np.cos(dec) * np.sin(ra),
         np.sin(dec)
     ])
+    r_gs_eci = R1 @ r_gs
 
-    pos[0] += r_gs[0]
-    pos[1] += r_gs[1]
-    pos[2] += r_gs[2]
+    pos[0] += r_gs_eci[0]
+    pos[1] += r_gs_eci[1]
+    pos[2] += r_gs_eci[2]
     
     return pos
 
