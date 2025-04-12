@@ -300,21 +300,21 @@ def get_perturbed_propagator_settings(
 
     # Define accelerations acting on vehicle.
     acceleration_settings_on_spacecraft = dict( 
-       #  Sun = 
-        #  [
-        #      propagation_setup.acceleration.radiation_pressure(),
-        #      propagation_setup.acceleration.point_mass_gravity()
-        #  ],
+        Sun = 
+         [
+             propagation_setup.acceleration.radiation_pressure(),
+             propagation_setup.acceleration.point_mass_gravity()
+         ],
         Earth = 
         [
-            propagation_setup.acceleration.point_mass_gravity(),
-            #propagation_setup.acceleration.spherical_harmonic_gravity(8, 8),
-            #propagation_setup.acceleration.aerodynamic()
+            #propagation_setup.acceleration.point_mass_gravity(),
+            propagation_setup.acceleration.spherical_harmonic_gravity(8, 8),
+            propagation_setup.acceleration.aerodynamic()
         ],
-        #  Moon = 
-        #  [
-        #      propagation_setup.acceleration.point_mass_gravity()
-        # ],
+         Moon = 
+         [
+             propagation_setup.acceleration.point_mass_gravity()
+        ],
     )
     
     # Create global accelerations dictionary.
@@ -337,7 +337,31 @@ def get_perturbed_propagator_settings(
     integrator_settings = propagation_setup.integrator.runge_kutta_fixed_step_size(
         0.01, coefficient_set, order_to_use
     )
-    
+
+    # # Define integrator step settings
+    # initial_time_step = 10.0
+    # minimum_step_size = 1.0e-12
+    # maximum_step_size = np.inf
+
+    # # Retrieve coefficient set
+    # coefficient_set = propagation_setup.integrator.rkf_78
+    # # Create integrator settings
+    # step_size_control_settings = (
+    # # propagation_setup.integrator.step_size_control_elementwise_scalar_tolerance(current_tolerance, absolute_tolerances[i])
+    # # )
+    # propagation_setup.integrator.step_size_control_blockwise_scalar_tolerance([[0,0,3,1],[3,0,3,1]],1e-12, 1e-12))
+    # step_size_validation_settings = propagation_setup.integrator.step_size_validation(
+    # minimum_step_size,
+    # maximum_step_size,
+    # )
+
+    # Create variable step-size integrator settings
+    # integrator_settings = propagation_setup.integrator.runge_kutta_variable_step(
+    #     initial_time_step,
+    #     coefficient_set,
+    #     step_size_control_settings,
+    #     step_size_validation_settings
+    # )
 
 
     propagator_settings = propagation_setup.propagator.translational(

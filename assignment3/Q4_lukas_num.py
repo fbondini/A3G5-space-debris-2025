@@ -22,7 +22,11 @@ bodies = tudat_initialize_bodies(bodies_to_create)
 meas_file = Path(__file__).parent / "data" / "group5" / "q4_meas_iod_99005.pkl"
 state_params, meas_dict, sensor_params = EstUtil.read_measurement_file(meas_file)
 
+print(f"State params {state_params}")
 
+print(f"Sensor parames {sensor_params}")
+
+print(f"Meas Dict {meas_dict}")
 
 sensor_pos_ecef = sensor_params['sensor_ecef']
 
