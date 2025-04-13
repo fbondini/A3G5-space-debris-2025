@@ -680,7 +680,7 @@ def compute_gt_roots(gvec, interp_mat, a, b):
         Amat[jj,jj+1] = 0.5
         
     # Compute eigenvalues
-    # TODO paper indicates some eigenvalues may have small imaginary component
+    # ? #NOTE: paper indicates some eigenvalues may have small imaginary component
     # but testing seems to show this is much more significant issue, needs
     # further analysis
     eig, dum = np.linalg.eig(Amat)

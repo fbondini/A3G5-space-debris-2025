@@ -4,6 +4,9 @@ from datetime import datetime
 import time
 import matplotlib.pyplot as plt
 import pickle
+import seaborn as sns
+from pathlib import Path
+from matplotlib import style
 
 import EstimationUtilities as EstUtil
 import TudatPropagator as prop
@@ -13,8 +16,12 @@ import ConjunctionUtilities as ConjUtil
 # Basic I/O
 ###############################################################################
 
+main_directory = Path(__file__).parent.parent  # A3G5-space-debris-2025 directory (root) 
+# assignment_data_directory = main_directory.joinpath('assignment3/data/group5')
+style.use(main_directory.joinpath("default/default.mplstyle"))
+
 # Set directory for assignment data
-assignment_data_directory = 'data/unit_test'
+assignment_data_directory = main_directory.joinpath('assignment3/data/unit_test')
 
 # Load RSO catalog file
 rso_file = os.path.join(assignment_data_directory, 'unit_test_rso_catalog.pkl')
@@ -215,6 +222,37 @@ filter_output = EstUtil.ukf(state_params, meas_dict, sensor_params, int_params, 
 print('')
 print('filter output fields:')
 print('number of output entries: ', len(filter_output.keys()))
+
+final_covariance = filter_output[meas_dict["tk_list"][-1]]["covar"]
+
+plt.figure()
+ax = sns.heatmap(
+    final_covariance,
+    annot=True,
+    cmap='viridis',
+    fmt=".2f",
+    cbar=True,
+    linewidths=0.8,          # Thickness of the grid lines
+    linecolor='white',       # Grid line color
+    square=True              # Optional: makes cells square
+)
+
+# Add labels
+ax.set_title("Covariance Matrix Heatmap")
+ax.set_xlabel("Parameter indexes")
+ax.set_ylabel("Parameter indexes")
+
+# Beautify ticks
+ax.tick_params(bottom=False, left=False)
+
+ax.grid(False)  # Removes the default axes grid
+
+# Optional: align ticks to center of each square
+ax.set_xticks(ax.get_xticks(), labels=ax.get_xticklabels(), rotation=0)
+ax.set_yticks(ax.get_yticks(), labels=ax.get_yticklabels(), rotation=0)
+
+plt.tight_layout()
+plt.show()
 
 
 # For the unit test, truth data are provided which can be used to compute errors.

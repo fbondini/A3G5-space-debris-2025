@@ -207,7 +207,7 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
     
     # Number of epochs
     N = len(tk_list)
-  
+
     # Loop over times
     Xk = Xo.copy()
     Pk = Po.copy()
@@ -229,7 +229,207 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
         else:
             tvec = np.array([tk_prior, tk])
             dum, Xbar, Pbar = prop.propagate_state_and_covar(Xk, Pk, tvec, state_params, int_params, bodies, alpha)
-       
+
+        # State Noise Compensation
+        # Zero out SNC for long time gaps
+        delta_t = tk - tk_prior
+        if delta_t > gap_seconds:    
+            Gamma = np.zeros((n,q))
+        else:
+            Gamma = np.zeros((n,q))
+            Gamma[0:q,:] = (delta_t**2./2) * np.eye(q)
+            Gamma[q:2*q,:] = delta_t * np.eye(q)
+
+        # Combined Q matrix (ECI and RIC components)
+        # Rotate RIC to ECI and add
+        rc_vect = Xbar[0:3].reshape(3,1)
+        vc_vect = Xbar[3:6].reshape(3,1)
+        Q = Qeci + ric2eci(rc_vect, vc_vect, Qric)
+                
+        # Add Process Noise to Pbar
+        Pbar += np.dot(Gamma, np.dot(Q, Gamma.T))
+
+        # Recompute sigma points to incorporate process noise
+        sqP = np.linalg.cholesky(Pbar)
+        Xrep = np.tile(Xbar, (1, n))
+        chi_bar = np.concatenate((Xbar, Xrep+(gam*sqP), Xrep-(gam*sqP)), axis=1) 
+        chi_diff = chi_bar - np.dot(Xbar, np.ones((1, (2*n+1))))
+        
+        # Measurement Update: posterior state and covar at tk       
+        # Retrieve measurement data
+        Yk = Yk_list[kk]
+        
+        # Computed measurements and covariance
+        gamma_til_k, Rk = unscented_meas(tk, chi_bar, sensor_params, bodies)
+        ybar = np.dot(gamma_til_k, Wm.T)
+        ybar = np.reshape(ybar, (len(ybar), 1))
+        Y_diff = gamma_til_k - np.dot(ybar, np.ones((1, (2*n+1))))
+        Pyy = np.dot(Y_diff, np.dot(diagWc, Y_diff.T)) + Rk
+        Pxy = np.dot(chi_diff,  np.dot(diagWc, Y_diff.T))
+        
+        # Kalman gain and measurement update
+        Kk = np.dot(Pxy, np.linalg.inv(Pyy))
+        Xk = Xbar + np.dot(Kk, Yk-ybar)
+        
+        # Joseph form of covariance update
+        cholPbar = np.linalg.inv(np.linalg.cholesky(Pbar))
+        invPbar = np.dot(cholPbar.T, cholPbar)
+        P1 = (np.eye(n) - np.dot(np.dot(Kk, np.dot(Pyy, Kk.T)), invPbar))
+        P2 = np.dot(Kk, np.dot(Rk, Kk.T))
+        P = np.dot(P1, np.dot(Pbar, P1.T)) + P2
+
+        # Recompute measurments using final state to get resids
+        sqP = np.linalg.cholesky(P)
+        Xrep = np.tile(Xk, (1, n))
+        chi_k = np.concatenate((Xk, Xrep+(gam*sqP), Xrep-(gam*sqP)), axis=1)        
+        gamma_til_post, dum = unscented_meas(tk, chi_k, sensor_params, bodies)
+        ybar_post = np.dot(gamma_til_post, Wm.T)
+        ybar_post = np.reshape(ybar_post, (len(ybar), 1))
+        
+        # Post-fit residuals and updated state
+        resids = Yk - ybar_post
+        
+        print('')
+        print('kk', kk)
+        print('Yk', Yk)
+        print('ybar', ybar)     
+        print('resids', resids)
+        
+        # Store output
+        filter_output[tk] = {}
+        filter_output[tk]['state'] = Xk
+        filter_output[tk]['covar'] = P
+        filter_output[tk]['resids'] = resids
+
+    
+    return filter_output
+
+
+def ukf_full(state_params, meas_dict, sensor_params, params_variance, int_params, filter_params, bodies):    
+    '''
+    UKF WITH ALL PARAMETERS 
+    This function implements the Unscented Kalman Filter for the least
+    squares cost function.
+
+    Parameters
+    ------
+    state_params : dictionary
+        initial state and covariance for filter execution and propagator params
+        
+        fields:
+            epoch_tdb: epoch of state/covar [seconds since J2000]
+            state: nx1 numpy array contaiing position/velocity state in ECI [m, m/s]
+            covar: nxn numpy array containing Gaussian covariance matrix [m^2, m^2/s^2]
+            Cd: float, drag coefficient
+            Cr: float, reflectivity coefficient
+            area: float [m^2]
+            mass: float [kg]
+            sph_deg: int, spherical harmonics expansion degree for Earth
+            sph_ord: int, spherical harmonics expansion order for Earth
+            central_bodies: list of central bodies for propagator ["Earth"]
+            bodies_to_create: list of bodies to create ["Earth", "Sun", "Moon"]
+            
+    meas_dict : dictionary
+        measurement data over time for the filter 
+        
+        fields:
+            tk_list: list of times in seconds since J2000
+            Yk_list: list of px1 numpy arrays containing measurement data
+            
+    sensor_params : dictionary
+        location, constraint, noise parameters of sensor
+
+    params_variance : np.array
+        4x1 numpy array of variances for the mass, area, drag coefficient and radiation coefficient
+        
+    int_params : dictionary
+        numerical integration parameters
+        
+    filter_params : dictionary
+        fields:
+            Qeci: 3x3 numpy array of SNC accelerations in ECI [m/s^2]
+            Qric: 3x3 numpy array of SNC accelerations in RIC [m/s^2]
+            alpha: float, UKF sigma point spread parameter, should be in range [1e-4, 1]
+            gap_seconds: float, time in seconds between measurements for which SNC should be zeroed out, i.e., if tk-tk_prior > gap_seconds, set Q=0
+            
+    bodies : tudat object
+        contains parameters for the environment bodies used in propagation
+
+    Returns
+    ------
+    filter_output : dictionary
+        output state, covariance, and post-fit residuals at measurement times
+        
+        indexed first by tk, then contains fields:
+            state: nx1 numpy array, estimated Cartesian state vector at tk [m, m/s]
+            covar: nxn numpy array, estimated covariance at tk [m^2, m^2/s^2]
+            resids: px1 numpy array, measurement residuals at tk [meters and/or radians]
+        
+    '''
+        
+    # Retrieve data from input parameters
+    t0 = state_params['epoch_tdb']
+    Xo = state_params['state']
+    Xo = np.vstack((Xo, np.array([state_params["Cd"], state_params["Cr"]]).reshape(2,1)))
+
+    Po_state = state_params['covar']
+    Po = np.zeros((8, 8))
+    Po[0:6, 0:6] = Po_state
+    Po[(6,7),(6,7)] = params_variance
+
+    Qeci = filter_params['Qeci']
+    Qric = filter_params['Qric']
+    alpha = filter_params['alpha']
+    gap_seconds = filter_params['gap_seconds']
+
+    n = len(Xo)
+    q = int(Qeci.shape[0])
+    
+    # Prior information about the distribution
+    beta = 2.
+    kappa = 3. - float(n)
+    
+    # Compute sigma point weights    
+    lam = alpha**2.*(n + kappa) - n
+    gam = np.sqrt(n + lam)
+    Wm = 1./(2.*(n + lam)) * np.ones(2*n,)
+    Wc = Wm.copy()
+    Wm = np.insert(Wm, 0, lam/(n + lam))
+    Wc = np.insert(Wc, 0, lam/(n + lam) + (1 - alpha**2 + beta))
+    diagWc = np.diag(Wc)
+
+    # Initialize output
+    filter_output = {}
+
+    # Measurement times
+    tk_list = meas_dict['tk_list']
+    Yk_list = meas_dict['Yk_list']
+    
+    # Number of epochs
+    N = len(tk_list)
+
+    # Loop over times
+    Xk = Xo.copy()
+    Pk = Po.copy()
+    for kk in range(N):
+    
+        # Current and previous time
+        if kk == 0:
+            tk_prior = t0
+        else:
+            tk_prior = tk_list[kk-1]
+
+        tk = tk_list[kk]
+        
+        # Propagate state and covariance
+        # No prediction needed if measurement time is same as current state
+        if tk_prior == tk:
+            Xbar = Xk.copy()
+            Pbar = Pk.copy()
+        else:
+            tvec = np.array([tk_prior, tk])
+            dum, Xbar, Pbar = prop.propagate_state_and_covar_full(Xk, Pk, tvec, state_params, int_params, bodies, alpha)
+
         # State Noise Compensation
         # Zero out SNC for long time gaps
         delta_t = tk - tk_prior
@@ -527,14 +727,14 @@ def ecef2enu(r_ecef, r_site):
     Parameters
     ------
     r_ecef : 3x1 numpy array
-      position vector in ECEF [m]
+        position vector in ECEF [m]
     r_site : 3x1 numpy array
-      station position vector in ECEF [m]
+        station position vector in ECEF [m]
 
     Returns
     ------
     r_enu : 3x1 numpy array
-      position vector in ENU [m]
+        position vector in ENU [m]
     '''
 
     # Compute lat,lon,ht of ground station
@@ -783,3 +983,111 @@ def ric2eci(rc_vect, vc_vect, Q_ric=[]):
         Q_eci = np.dot(np.dot(NO, Q_ric), NO.T)
 
     return Q_eci
+
+
+###############################################################################
+# # Magnitude model calculation
+###############################################################################
+
+def compute_magnitude(sun_pos_vec, obs_pos_vec, ss_pos_vec, area, Cr, mag_sun):
+    """ Compute magnitude for at an instant in time.
+
+    Parameters
+    ---------- 
+    sun_pos_vec: numpy.ndarray
+        Position vector from the propagation center to the Sun (ECI)
+    obs_pos_vec: numpy.ndarray
+        Position vector from the propagation center to the observer (ECI)
+    sun_pos_vec: numpy.ndarray
+        Position vector from the propagation center to the spacecraft (ECI)
+    area: float
+        Reflective area of the spacecraft
+    Cr: float
+        Reflectivity coefficient of the spacecraft (the same as the SRP model)
+    mag_sun: float
+        Magnitude of the Sun
+
+    Returns
+    -------
+    modelled_magnitude: float
+        value of magnitude of the spacecraft as seen from the observer computed according to
+        the model shown in the assignment report
+    
+    """
+    # Relative positions vectors and norms
+    vector_ObsToSS = ss_pos_vec - obs_pos_vec
+    vector_SunToSS = ss_pos_vec - sun_pos_vec
+
+    norm_ObsToSS = np.linalg.norm(vector_ObsToSS)
+    norm_SunToSS = np.linalg.norm(vector_SunToSS)
+
+    # Phase angle and coefficient
+    phase_angle = np.arccos(np.dot(vector_ObsToSS, vector_SunToSS) / (norm_ObsToSS * norm_SunToSS))
+    phase_angle_coeff = phase_angle_function(phase_angle)
+
+    # Compute magnitude based on model described in the report
+    diffused_flux = (2 / 3) * (Cr - 1) * area * phase_angle_coeff / (np.pi ** 2 * norm_ObsToSS)
+    modelled_magnitude = -2.5 * np.log10(diffused_flux) + mag_sun
+
+    return modelled_magnitude, phase_angle
+
+def phase_angle_function(phase_angle):
+    return (np.sin(phase_angle) + (np.pi - phase_angle) * np.cos(phase_angle))
+
+
+def compute_magnitude_in_time(sun_pos_vec, obs_pos_vec, ss_pos_vec, area, Cr, mag_sun):
+    """ Compute magnitude for at all instants in time.
+
+    Parameters
+    ---------- 
+    sun_pos_vec: numpy.ndarray[np.ndarray]
+        Array of position vectors from the propagation center to the Sun (ECI)
+    obs_pos_vec: numpy.ndarray[np.ndarray]
+        Array of position vectors from the propagation center to the observer (ECI)
+    sun_pos_vec: numpy.ndarray[np.ndarray]
+        Array of position vectors from the propagation center to the spacecraft (ECI)
+    area: float
+        Reflective area of the spacecraft
+    Cr: float
+        Reflectivity coefficient of the spacecraft (the same as the SRP model)
+    mag_sun: float
+        Magnitude of the Sun
+
+    Returns
+    -------
+    magnitude_vector: np.array
+        values of magnitude of the spacecraft as seen from the observer computed according to
+        the model shown in the assignment report
+    
+    """
+
+    if len(sun_pos_vec) != len(obs_pos_vec) or len(sun_pos_vec) != len(ss_pos_vec):
+        raise ValueError("The length of the position vectors arrays don't match")
+    
+    magnitude_vector = np.empty(len(sun_pos_vec))
+    for i in range(len(sun_pos_vec)):
+        magnitude_vector[i], phase_angle = compute_magnitude(
+            sun_pos_vec[i], obs_pos_vec[i], ss_pos_vec[i],
+            area, Cr, mag_sun
+        )
+
+    return magnitude_vector
+
+def get_pos_vectors(dep_var_history, sensor_params):
+    """dep_var_history has to have ss pos wrt to center of prop, and sun pos wrt to center of prop,
+    and rotation matrix eci2ecef"""
+
+    # get vectors from dependent variables history & rotation matrix
+    history_stack = np.vstack(list(dep_var_history.values()))
+    ss_pos_vec = history_stack[:, :3]
+    sun_pos_vec = history_stack[:, 3:6]
+    
+    obs_pos_vec = np.empty([len(history_stack), 3])
+    for time_idx in range(len(history_stack)):
+        ecef2eci = np.transpose(np.reshape(history_stack[time_idx, 6:15], [3,3]))
+
+        # get observer position vector
+        obs_ecef = np.array(sensor_params["sensor_ecef"])
+        obs_pos_vec[time_idx, :] = np.array(ecef2eci @ obs_ecef)[0]  # eci
+
+    return sun_pos_vec, obs_pos_vec, ss_pos_vec
