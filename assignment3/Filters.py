@@ -1341,7 +1341,15 @@ def screening_volume(rso_catalog , ID , filtered_ids = [] , original_epoch =  79
             if counter > 0:
                 print(f"The object {id} entered the screening volume for {counter * step} seconds.")
                 filtered_ids.append(id)
+    # Calculate the number of remaining objects and percentage
+    total_objects = len(ids)
+    remaining_objects = len(filtered_ids)
+    percentage_remaining = (remaining_objects / total_objects) * 100
 
+    print(f"Screening volume completed.")
+    print(f"Total objects: {total_objects}")
+    print(f"Remaining objects after screening: {remaining_objects}")
+    print(f"Percentage of remaining objects: {percentage_remaining:.2f}%")
 
     return filtered_ids
 

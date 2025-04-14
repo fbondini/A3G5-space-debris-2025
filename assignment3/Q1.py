@@ -85,7 +85,7 @@ t_range = [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY]
 
 
 
-#result = conjunction_assessment(rso_catalog, ID)
+result = conjunction_assessment(rso_catalog, ID)
 # # # # # # Save the result to a file for later access
 # result_file = 'conjunction_assessment_result.pkl'
 # with open(result_file, 'wb') as file:
@@ -99,7 +99,7 @@ t_range = [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY]
 
 # processing_results_gaussian(loaded_result, rso_catalog, ID)
 
-#plot_3D_orbits(rso_catalog , ID , result)
+plot_3D_orbits(rso_catalog , ID , result)
 
 
 
