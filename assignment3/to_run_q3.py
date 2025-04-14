@@ -36,6 +36,10 @@ mass_1 = rso_catalog[ID]['mass']
 
 # TO MODIFY FOR Q3 
 
+state_q3 = ... # in the form np.array([[...],[...],[...],[...],[...],[...]])
+
+covar_q3 = ... # In the form np.array([[... , ... ,... , ... , ... , ...],[..., ... ,... , ..., ..., ...],... 
+
 ID_q3 = ...
 
 Cd = ...
@@ -57,5 +61,5 @@ print("QUESTION 3")
 print("##########################")
 print("##########################")
 
-result_q3 = conj_ass_Q3(rso_catalog , ID, ID_q3 , Cd_new = Cd , Cr_new = Cr , mass_new= mass , area_new= area )
+result_q3 = conj_ass_Q3(rso_catalog , ID, state_q3, covar_q3,ID_q3 , Cd_new = Cd , Cr_new = Cr , mass_new= mass , area_new= area )
 

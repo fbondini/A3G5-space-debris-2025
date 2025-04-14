@@ -1203,7 +1203,7 @@ def conj_ass_Q2(rso_catalog , ID_ref , ID_maneuver, tdb_epoch_deltav , final_sta
     return result
 
 
-def conj_ass_Q3(rso_catalog , ID_ref , ID_body, Cd_new =2.2, Cr_new = 1.3 , mass_new = 100 , area_new = 1):
+def conj_ass_Q3(rso_catalog , ID_ref , state_new , covar_new , ID_body, Cd_new =2.2, Cr_new = 1.3 , mass_new = 100 , area_new = 1 ):
 
 
     state_ref = rso_catalog[ID_ref]['state']
@@ -1218,9 +1218,6 @@ def conj_ass_Q3(rso_catalog , ID_ref , ID_body, Cd_new =2.2, Cr_new = 1.3 , mass
     mass_1 = rso_catalog[ID_ref]['mass']
 
     # Take also the parameters from the Q3 ID
-
-    state_q3 = rso_catalog[ID_body]['state']
-    P_q3 = rso_catalog[ID_body]['covar']
     tdb_epoch_q3 = rso_catalog[ID_body]['epoch_tdb']
 
     rso_catalog_q3 = {}
@@ -1238,8 +1235,8 @@ def conj_ass_Q3(rso_catalog , ID_ref , ID_body, Cd_new =2.2, Cr_new = 1.3 , mass
     }
 
     rso_catalog_q3[ID_body] = {
-        "state": state_q3,
-        "covar": P_q3,
+        "state": state_new,
+        "covar": covar_new,
         "epoch_tdb": tdb_epoch_q3,
         "area" : area_new,
         "mass" : mass_new, 
