@@ -85,7 +85,7 @@ t_range = [tdb_epoch , tdb_epoch + 2*constants.JULIAN_DAY]
 
 
 
-result = conjunction_assessment(rso_catalog, ID)
+#result = conjunction_assessment(rso_catalog, ID)
 # # # # # # Save the result to a file for later access
 # result_file = 'conjunction_assessment_result.pkl'
 # with open(result_file, 'wb') as file:
@@ -99,7 +99,7 @@ result = conjunction_assessment(rso_catalog, ID)
 
 # processing_results_gaussian(loaded_result, rso_catalog, ID)
 
-plot_3D_orbits(rso_catalog , ID , result)
+#plot_3D_orbits(rso_catalog , ID , result)
 
 
 
@@ -113,41 +113,43 @@ plot_3D_orbits(rso_catalog , ID , result)
 # THe only problem is apparently Q2, as the object 91159 will perform a maneuver in an epoch later than the initial one provided. 
 # The latter has already been analysed, and it will (without any maneuver), closely encounter the reference ID. 
 
-# Supposedly you get the delta-v at a certain epoch, with supposedly a modified state and covariance? 
+# # Supposedly you get the delta-v at a certain epoch, with supposedly a modified state and covariance? 
 
-state_91159 = ...
+# state_91159 = ...
 
-cov_91159 = ...
+# cov_91159 = ...
 
-epoch_tdb_91159 = ...
+# epoch_tdb_91159 = ...
 
-# Those are the only thing that actually changes. In my opinion, the smart way of doing this is creating a catalog with just the object, and analyzing 
-# it from the start of the maneuver to the end of the 2 days time span. The time from the initial epoch to the maneuver itself will not be analyzed if 
-# the objects has not encountered the main object in that time span (which is the case, see report)
+# # Those are the only thing that actually changes. In my opinion, the smart way of doing this is creating a catalog with just the object, and analyzing 
+# # it from the start of the maneuver to the end of the 2 days time span. The time from the initial epoch to the maneuver itself will not be analyzed if 
+# # the objects has not encountered the main object in that time span (which is the case, see report)
 
-result = conj_ass_Q2(rso_catalog , ID , 91159 , epoch_tdb_91159 , state_91159 , cov_91159) # To run (?)
+# result = conj_ass_Q2(rso_catalog , ID , 91159 , epoch_tdb_91159 , state_91159 , cov_91159) # To run (?)
 
 
 ## For the rest, I dont really know what it should be the output but in general
 ID_q3 = 91662
 # Q3 
-Cd_new = ...
-Cr_new = ...
-mass_new = ...
-area_new = ...
-rso_catalog[ID_q3]['Cd'] = Cd_new
-rso_catalog[ID_q3]['Cr'] = Cr_new
-rso_catalog[ID_q3]['area'] = mass_new
-rso_catalog[ID_q3]['mass'] = area_new
+Cd = 3
+Cr = 1.3
+mass = mass_1
+area= 1
 
-result_q3 = conjunction_assessment(rso_catalog , ID)
+print("##########################")
+print("##########################")
+print("QUESTION 3")
+print("##########################")
+print("##########################")
+
+result_q3 = conj_ass_Q3(rso_catalog , ID, ID_q3 , Cd_new = Cd , Cr_new = Cr , mass_new= mass , area_new= area )
 
 
-#Q4 
-ID_q4 = 99005
-state_mean_new = ...
-cov_new = ...
-rso_catalog[ID_q4]['state'] = state_mean_new
-rso_catalog[ID_q4]['cov'] = cov_new
+# #Q4 
+# ID_q4 = 99005
+# state_mean_new = ...
+# cov_new = ...
+# rso_catalog[ID_q4]['state'] = state_mean_new
+# rso_catalog[ID_q4]['cov'] = cov_new
 
-result_q4 = conjunction_assessment(rso_catalog , ID)
+# result_q4 = conjunction_assessment(rso_catalog , ID)

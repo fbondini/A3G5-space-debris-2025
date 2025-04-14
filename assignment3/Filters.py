@@ -1175,38 +1175,87 @@ def conj_ass_Q2(rso_catalog , ID_ref , ID_maneuver, tdb_epoch_deltav , final_sta
     _ , state_ref_f , P_ref_f = TudatPropagator.propagate_state_and_covar(state_ref , P_ref , [tdb_epoch , tdb_epoch_deltav],state_params , int_params )
 
     # At this point, construct the dictionary
-    new_rso = dict()
-
-    new_rso = { 
-        ID_ref :{
+    rso_catalog_q2 = {
+        ID_ref: {
             "state": state_ref_f,
             "covar": P_ref_f,
             "epoch_tdb": tdb_epoch_deltav,
-            "area" : area_1,
-            "mass" : mass_1, 
-            "Cr" : Cr_1,
-            "Cd" : Cd_1,
-        }
-    }
-    new_rso_2 = { 
+            "area": area_1,
+            "mass": mass_1,
+            "Cr": Cr_1,
+            "Cd": Cd_1,
+        },
         ID_maneuver: {
             "state": final_state,
             "covar": final_covariance,
             "epoch_tdb": tdb_epoch_deltav,
-            "area" : area_1,
-            "mass" : mass_1, 
-            "Cr" : Cr_1,
-            "Cd" : Cd_1,
-        }
+            "area": area_1,
+            "mass": mass_1,
+            "Cr": Cr_1,
+            "Cd": Cd_1,
+        },
     }
-
-    new_rso.append(new_rso_2)
 
     # Then, simply give it to the conj ass function (should work exactly the same with two objects )
 
-    result = conjunction_assessment(new_rso , ID_ref)
+    result = conjunction_assessment(rso_catalog_q2 , ID_ref)
 
     return result
+
+
+def conj_ass_Q3(rso_catalog , ID_ref , ID_body, Cd_new =2.2, Cr_new = 1.3 , mass_new = 100 , area_new = 1):
+
+
+    state_ref = rso_catalog[ID_ref]['state']
+    P_ref = rso_catalog[ID_ref]['covar']
+    tdb_epoch = rso_catalog[ID_ref]['epoch_tdb']
+    Cd_1 = rso_catalog[ID_ref]['Cd']
+
+    Cr_1 = rso_catalog[ID_ref]['Cr']
+
+    area_1 = rso_catalog[ID_ref]['area']
+
+    mass_1 = rso_catalog[ID_ref]['mass']
+
+    # Take also the parameters from the Q3 ID
+
+    state_q3 = rso_catalog[ID_body]['state']
+    P_q3 = rso_catalog[ID_body]['covar']
+    tdb_epoch_q3 = rso_catalog[ID_body]['epoch_tdb']
+
+    rso_catalog_q3 = {}
+    
+    # Construct a smaller dictionary of objects 
+
+    rso_catalog_q3[ID_ref] = {
+        "state": state_ref,
+        "covar": P_ref,
+        "epoch_tdb": tdb_epoch,
+        "area" : area_1,
+        "mass" : mass_1, 
+        "Cr" : Cr_1,
+        "Cd" : Cd_1,
+    }
+
+    rso_catalog_q3[ID_body] = {
+        "state": state_q3,
+        "covar": P_q3,
+        "epoch_tdb": tdb_epoch_q3,
+        "area" : area_new,
+        "mass" : mass_new, 
+        "Cr" : Cr_new,
+        "Cd" : Cd_new,
+    }
+
+    # Then, simply give it to the conj ass function (should work exactly the same with two objects )
+
+    result = conjunction_assessment(rso_catalog_q3, ID_ref)
+
+    plot_3D_orbits(rso_catalog , ID_ref , result)
+
+    return result
+
+
 
 def screening_volume(rso_catalog , ID , filtered_ids = [] , original_epoch =  796780800.0):
 
