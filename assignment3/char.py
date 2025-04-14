@@ -1,7 +1,7 @@
 """Small introduction to the object characterisation question."""
 import numpy as np
 from pathlib import Path
-from EstimationUtilities import read_measurement_file, ukf, ukf_full, get_pos_vectors, compute_magnitude_in_time
+from EstimationUtilities import read_measurement_file, ukf, ukf_full, get_pos_vectors, compute_magnitude_in_time, compute_magnitude
 from ConjunctionUtilities import read_catalog_file
 from TudatPropagator import tudat_initialize_bodies, propagate_orbit_wdepvars
 from dataclasses import dataclass
@@ -50,7 +50,6 @@ int_params_mag = {
 
 # Dependent variables
 depvars = [
-    propagation_setup.dependent_variable.relative_position("0", "Earth"),
     propagation_setup.dependent_variable.relative_position("Sun", "Earth"),
     propagation_setup.dependent_variable.inertial_to_body_fixed_rotation_frame("Earth")
 ]
@@ -191,16 +190,20 @@ if __name__ == "__main__":
     plt.tight_layout()
 
     tout, Xout, depvars_history = propagate_orbit_wdepvars(
-        np.array(state_params['state']),
-        optical_data.meas_dict["tk_list"],
-        state_params,
+        np.array(optical_data.state_params['state']),
+        [optical_data.state_params["epoch_tdb"], optical_data.meas_dict["tk_list"][-1]],
+        optical_data.state_params,
         int_params_mag,
         bodies,
         depvars
     )
 
-    sun_position_vector,obs_position_vector, ss_position_vector = get_pos_vectors(
-        depvars_history, optical_data.sensor_params
+    # Mask used to compare meas and model values only at the tk_list times
+    mask = np.isin(tout, optical_data.meas_dict["tk_list"])
+    tout_trim = tout[mask]
+
+    sun_position_vector, obs_position_vector, ss_position_vector = get_pos_vectors(
+        Xout[:,:3], depvars_history, optical_data.sensor_params
     )
 
     model_magnitudes = compute_magnitude_in_time(
@@ -208,12 +211,7 @@ if __name__ == "__main__":
         state_params['area'], state_params['Cr'], MAG_SUN
     )
 
-    lower = 0
-    upper = len(magnitudes)
-    mid = 287
-
-    model_magnitudes_trim = np.append(model_magnitudes[lower:287],model_magnitudes[len(model_magnitudes)-(upper-mid):])
-    mag_prefit_residuals = magnitudes - model_magnitudes_trim
+    model_magnitudes_trim = model_magnitudes[mask]
 
     plt.figure()
 

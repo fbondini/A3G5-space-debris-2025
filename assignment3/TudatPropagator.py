@@ -928,7 +928,7 @@ def propagate_orbit_wdepvars(Xo, tvec, state_params, int_params, bodies=None, de
     
     tout = states_array[:,0]
     Xout = states_array[:,1:6*N+1]
-
+    
     dependent_variable_history = (
         dynamics_simulator.propagation_results.dependent_variable_history
     )

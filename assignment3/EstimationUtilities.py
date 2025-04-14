@@ -270,6 +270,9 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
         # Kalman gain and measurement update
         Kk = np.dot(Pxy, np.linalg.inv(Pyy))
         Xk = Xbar + np.dot(Kk, Yk-ybar)
+
+        if tk > 796813211:
+            print("this")
         
         # Joseph form of covariance update
         cholPbar = np.linalg.inv(np.linalg.cholesky(Pbar))
@@ -1026,7 +1029,7 @@ def compute_magnitude(sun_pos_vec, obs_pos_vec, ss_pos_vec, area, Cr, mag_sun):
     phase_angle_coeff = phase_angle_function(phase_angle)
 
     # Compute magnitude based on model described in the report
-    diffused_flux = (2 / 3) * (Cr - 1) * area * phase_angle_coeff / (np.pi ** 2 * norm_ObsToSS)
+    diffused_flux = (2 / 3) * (Cr - 1) * area * phase_angle_coeff / (np.pi ** 2 * norm_ObsToSS ** 2)
     modelled_magnitude = -2.5 * np.log10(diffused_flux) + mag_sun
 
     return modelled_magnitude, phase_angle
@@ -1073,21 +1076,23 @@ def compute_magnitude_in_time(sun_pos_vec, obs_pos_vec, ss_pos_vec, area, Cr, ma
 
     return magnitude_vector
 
-def get_pos_vectors(dep_var_history, sensor_params):
+def get_pos_vectors(ss_pos_vec, dep_var_history, sensor_params):
     """dep_var_history has to have ss pos wrt to center of prop, and sun pos wrt to center of prop,
     and rotation matrix eci2ecef"""
 
     # get vectors from dependent variables history & rotation matrix
     history_stack = np.vstack(list(dep_var_history.values()))
-    ss_pos_vec = history_stack[:, :3]
-    sun_pos_vec = history_stack[:, 3:6]
+    times = np.vstack(list(dep_var_history.keys()))
+    sun_pos_vec = history_stack[:, :3]
     
     obs_pos_vec = np.empty([len(history_stack), 3])
+    
+    # get observer position vector
+    obs_ecef = np.array(sensor_params["sensor_ecef"])
     for time_idx in range(len(history_stack)):
-        ecef2eci = np.transpose(np.reshape(history_stack[time_idx, 6:15], [3,3]))
+        ecef2eci = np.transpose(np.reshape(history_stack[time_idx, 3:12], [3,3]))
 
-        # get observer position vector
-        obs_ecef = np.array(sensor_params["sensor_ecef"])
-        obs_pos_vec[time_idx, :] = np.array(ecef2eci @ obs_ecef)[0]  # eci
+        obs_eci = np.transpose(np.array(ecef2eci @ obs_ecef))
+        obs_pos_vec[time_idx, :] = obs_eci
 
     return sun_pos_vec, obs_pos_vec, ss_pos_vec
