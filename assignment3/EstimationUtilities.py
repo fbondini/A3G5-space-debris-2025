@@ -270,9 +270,6 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
         # Kalman gain and measurement update
         Kk = np.dot(Pxy, np.linalg.inv(Pyy))
         Xk = Xbar + np.dot(Kk, Yk-ybar)
-
-        if tk > 796813211:
-            print("this")
         
         # Joseph form of covariance update
         cholPbar = np.linalg.inv(np.linalg.cholesky(Pbar))
@@ -1096,3 +1093,21 @@ def get_pos_vectors(ss_pos_vec, dep_var_history, sensor_params):
         obs_pos_vec[time_idx, :] = obs_eci
 
     return sun_pos_vec, obs_pos_vec, ss_pos_vec
+
+
+def model_magnitude_meas(x, area):
+    # x has following columns [sunpos(tk), obspos(tk), sspos(tk)]
+    sun_pos = x[:, :3]
+    obs_pos = x[:, 3:6]
+    ss_pos = x[:, 6:9]
+
+    Cr = 1.3
+
+    MAG_SUN = -26.74
+    
+    y = compute_magnitude_in_time(sun_pos, obs_pos, ss_pos, Cr, area, MAG_SUN)
+
+    return y
+
+
+
