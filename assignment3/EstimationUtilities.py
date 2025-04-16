@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import os
 import pandas as pd
 import pickle
+import sys
 
 
 from tudatpy.numerical_simulation import environment_setup
@@ -783,3 +784,287 @@ def ric2eci(rc_vect, vc_vect, Q_ric=[]):
         Q_eci = np.dot(np.dot(NO, Q_ric), NO.T)
 
     return Q_eci
+
+def ukf_until_first_truth(state_params, meas_dict, sensor_params, int_params, filter_params, bodies):
+    '''
+    This function implements the Unscented Kalman Filter for the least
+    squares cost function, and stops after the Cholesky decomposition of
+    the propagated covariance (Pbar) fails. Note: It will always fail due
+    to the DELTAV maneuver performed!
+
+    Parameters
+    ------
+    state_params : dictionary
+        initial state and covariance for filter execution and propagator params
+
+        fields:
+            epoch_tdb: epoch of state/covar [seconds since J2000]
+            state: nx1 numpy array contaiing position/velocity state in ECI [m, m/s]
+            covar: nxn numpy array containing Gaussian covariance matrix [m^2, m^2/s^2]
+            Cd: float, drag coefficient
+            Cr: float, reflectivity coefficient
+            area: float [m^2]
+            mass: float [kg]
+            sph_deg: int, spherical harmonics expansion degree for Earth
+            sph_ord: int, spherical harmonics expansion order for Earth
+            central_bodies: list of central bodies for propagator ["Earth"]
+            bodies_to_create: list of bodies to create ["Earth", "Sun", "Moon"]
+
+    meas_dict : dictionary
+        measurement data over time for the filter
+
+        fields:
+            tk_list: list of times in seconds since J2000
+            Yk_list: list of px1 numpy arrays containing measurement data
+
+    sensor_params : dictionary
+        location, constraint, noise parameters of sensor
+
+    int_params : dictionary
+        numerical integration parameters
+
+    filter_params : dictionary
+        fields:
+            Qeci: 3x3 numpy array of SNC accelerations in ECI [m/s^2]
+            Qric: 3x3 numpy array of SNC accelerations in RIC [m/s^2]
+            alpha: float, UKF sigma point spread parameter, should be in range [1e-4, 1]
+            gap_seconds: float, time in seconds between measurements for which SNC should be zeroed out,
+                         i.e., if tk-tk_prior > gap_seconds, set Q=0
+
+    bodies : tudat object
+        contains parameters for the environment bodies used in propagation
+
+    Returns
+    ------
+    filter_output : dictionary
+        output state, covariance, and post-fit residuals at measurement times
+
+        indexed first by tk, then contains fields:
+            state: nx1 numpy array, estimated Cartesian state vector at tk [m, m/s]
+            covar: nxn numpy array, estimated covariance at tk [m^2, m^2/s^2]
+            resids: px1 numpy array, measurement residuals at tk [meters and/or radians]
+
+    '''
+    # Retrieve data from input parameters
+    t0 = state_params['epoch_tdb']
+    Xo = state_params['state']
+    Po = state_params['covar']
+    Qeci = filter_params['Qeci']
+    Qric = filter_params['Qric']
+    alpha = filter_params['alpha']
+    gap_seconds = filter_params['gap_seconds']
+
+    n = len(Xo)
+    q = int(Qeci.shape[0])
+
+    # Prior information about the distribution
+    beta = 2.
+    kappa = 3. - float(n)
+
+    # Compute sigma point weights
+    lam = alpha ** 2 * (n + kappa) - n
+    gam = np.sqrt(n + lam)
+    Wm = 1. / (2. * (n + lam)) * np.ones(2 * n, )
+    Wc = Wm.copy()
+    Wm = np.insert(Wm, 0, lam / (n + lam))
+    Wc = np.insert(Wc, 0, lam / (n + lam) + (1 - alpha ** 2 + beta))
+    diagWc = np.diag(Wc)
+
+    # Initialize output
+    filter_output = {}
+
+    # Measurement times
+    tk_list = meas_dict['tk_list']
+    Yk_list = meas_dict['Yk_list']
+
+    # Number of epochs
+    N = len(tk_list)
+
+    # Loop over times
+    Xk = Xo.copy()
+    Pk = Po.copy()
+    for kk in range(N):
+
+        # Current and previous time
+        if kk == 0:
+            tk_prior = t0
+        else:
+            tk_prior = tk_list[kk - 1]
+
+        tk = tk_list[kk]
+
+        # Propagate state and covariance
+        # No prediction needed if measurement time is same as current state
+        if tk_prior == tk:
+            Xbar = Xk.copy()
+            Pbar = Pk.copy()
+        else:
+            tvec = np.array([tk_prior, tk])
+            dum, Xbar, Pbar = prop.propagate_state_and_covar(Xk, Pk, tvec, state_params, int_params, bodies, alpha)
+
+        # State Noise Compensation
+        # Zero out SNC for long time gaps
+        delta_t = tk - tk_prior
+        if delta_t > gap_seconds:
+            Gamma = np.zeros((n, q))
+        else:
+            Gamma = np.zeros((n, q))
+            Gamma[0:q, :] = (delta_t ** 2. / 2) * np.eye(q)
+            Gamma[q:2 * q, :] = delta_t * np.eye(q)
+
+        # Combined Q matrix (ECI and RIC components)
+        # Rotate RIC to ECI and add
+        rc_vect = Xbar[0:3].reshape(3, 1)
+        vc_vect = Xbar[3:6].reshape(3, 1)
+        Q = Qeci + ric2eci(rc_vect, vc_vect, Qric)
+
+        # Add Process Noise to Pbar
+        Pbar += np.dot(Gamma, np.dot(Q, Gamma.T))
+
+        # Recompute sigma points to incorporate process noise
+        try:
+            sqP = np.linalg.cholesky(Pbar)
+        except np.linalg.LinAlgError:
+            print("Cholesky decomposition failed on Pbar at time tk =", tk, ". Returning output computed so far.")
+            return filter_output
+
+        Xrep = np.tile(Xbar, (1, n))
+        chi_bar = np.concatenate((Xbar, Xrep + (gam * sqP), Xrep - (gam * sqP)), axis=1)
+        chi_diff = chi_bar - np.dot(Xbar, np.ones((1, (2 * n + 1))))
+
+        # Measurement Update: posterior state and covar at tk
+        # Retrieve measurement data
+        Yk = Yk_list[kk]
+
+        # Computed measurements and covariance
+        gamma_til_k, Rk = unscented_meas(tk, chi_bar, sensor_params, bodies)
+        ybar = np.dot(gamma_til_k, Wm.T)
+        ybar = np.reshape(ybar, (len(ybar), 1))
+        Y_diff = gamma_til_k - np.dot(ybar, np.ones((1, (2 * n + 1))))
+        Pyy = np.dot(Y_diff, np.dot(diagWc, Y_diff.T)) + Rk
+        Pxy = np.dot(chi_diff, np.dot(diagWc, Y_diff.T))
+
+        # Kalman gain and measurement update
+        Kk = np.dot(Pxy, np.linalg.inv(Pyy))
+        Xk = Xbar + np.dot(Kk, Yk - ybar)
+
+        # Joseph form of covariance update
+        cholPbar = np.linalg.inv(np.linalg.cholesky(Pbar))
+        invPbar = np.dot(cholPbar.T, cholPbar)
+        P1 = (np.eye(n) - np.dot(np.dot(Kk, np.dot(Pyy, Kk.T)), invPbar))
+        P2 = np.dot(Kk, np.dot(Rk, Kk.T))
+        P = np.dot(P1, np.dot(Pbar, P1.T)) + P2
+
+        # Recompute measurements using final state to get residuals
+        try:
+            sqP = np.linalg.cholesky(P)
+        except np.linalg.LinAlgError:
+            print("Cholesky decomposition failed on updated covariance P at time tk =", tk, ". Returning output computed so far.")
+            return filter_output
+
+        Xrep = np.tile(Xk, (1, n))
+        chi_k = np.concatenate((Xk, Xrep + (gam * sqP), Xrep - (gam * sqP)), axis=1)
+        gamma_til_post, dum = unscented_meas(tk, chi_k, sensor_params, bodies)
+        ybar_post = np.dot(gamma_til_post, Wm.T)
+        ybar_post = np.reshape(ybar_post, (len(ybar_post), 1))
+
+        # Post-fit residuals and updated state
+        resids = Yk - ybar_post
+
+        print('')
+        print('kk', kk)
+        print('Yk', Yk)
+        print('ybar', ybar)
+        print('resids', resids)
+
+        # Store output
+        filter_output[tk] = {}
+        filter_output[tk]['state'] = Xk
+        filter_output[tk]['covar'] = P
+        filter_output[tk]['resids'] = resids
+
+    return filter_output
+
+# ==============================================================================
+# Least Squares Maneuver Estimation Functions
+# ==============================================================================
+
+def predict_and_calculate_residuals(maneuver_params_norm, x_initial, t_initial, x_final_true, t_final, state_params, int_params, bodies, weight_matrix=None):
+    """
+    Predicts the final state by propagating the initial state through an impulsive
+    maneuver, and then calculates the residual vector (optionally weighted) between
+    the true final state and the predicted final state.
+
+    Args:
+        maneuver_params_norm (list or np.array): Normalized maneuver parameters
+            [dVx, dVy, dVz, tM_norm], where tM_norm is a normalized time between 0 and 1.
+        x_initial (np.array): Initial state vector [r, v] at t_initial (6x1).
+        t_initial (float): Initial time (seconds since J2000).
+        x_final_true (np.array): True final state vector [r, v] at t_final (6x1).
+        t_final (float): Final time (seconds since J2000).
+        state_params (dict): Propagation parameters for the propagator.
+        int_params (dict): Integration parameters for the propagator.
+        bodies (object): Environment bodies object for the propagator.
+        weight_matrix (np.array, optional): 6x6 weighting matrix. If provided,
+            the residuals will be multiplied by the transpose of the Cholesky factor.
+            If None, unweighted residuals are returned.
+
+    Returns:
+        np.array: Residual vector (x_final_true - x_predicted) as a 1D array of length 6.
+                If prediction fails, returns a 1D array with large penalized values.
+    """
+    # Check that the maneuver parameters have the proper number of elements
+    if len(maneuver_params_norm) != 4:
+        raise ValueError("maneuver_params_norm must have 4 elements: [dVx, dVy, dVz, tM_norm]")
+
+    # Unpack the parameters and form the delta-v vector
+    dVx, dVy, dVz, tM_norm = maneuver_params_norm  # tM_norm should be between 0 and 1
+    delta_v_vec = np.array([[dVx], [dVy], [dVz]])
+
+    # Map normalized maneuver time to actual time
+    tM = t_initial + tM_norm * (t_final - t_initial)
+
+    # Validate that the maneuver time is within the interval (with slight tolerance)
+    if not (t_initial - 1e-9 <= tM <= t_final + 1e-9):
+        # Return large residuals (flattened) if the maneuver time is out-of-bounds.
+        return np.full(x_final_true.shape, 1e12).flatten()
+
+    try:
+        # 1. Propagate from t_initial to tM
+        # asd and sad represent additional outputs that we do not use here
+        _, _, state_at_maneuver_minus = prop.propagate_orbit_both_ways(x_initial, [t_initial, tM], state_params, int_params, bodies)
+        if state_at_maneuver_minus is None:
+            raise ValueError(f"Propagation from t_initial={t_initial} to tM={tM} failed.")
+
+        # 2. Apply the impulsive delta-V at tM
+        state_at_maneuver_plus = state_at_maneuver_minus.copy()
+        state_at_maneuver_plus[3:6] += delta_v_vec  # add dV to the velocity components
+
+        # 3. Propagate from tM to t_final to get the final predicted state
+        _, _, predicted_state_final = prop.propagate_orbit_both_ways(state_at_maneuver_plus, [tM, t_final], state_params, int_params, bodies)
+        if predicted_state_final is None:
+            raise ValueError(f"Propagation from tM={tM} to t_final={t_final} failed.")
+
+    except Exception as e:
+        print(f"Error during prediction with params {maneuver_params_norm}: {e}")
+        predicted_state_final = np.full((6, 1), np.nan)
+
+    # Compute the residuals: flatten to a 1D array
+    if predicted_state_final is None or np.isnan(predicted_state_final).any():
+        residuals = np.full(x_final_true.shape, 1e12).flatten()
+    else:
+        residuals = (x_final_true - predicted_state_final).flatten()
+
+    # Apply weighting if a weight_matrix is provided.
+    if weight_matrix is not None:
+        if weight_matrix.shape != (6, 6):
+            raise ValueError("Weight matrix must be 6x6")
+        try:
+            L = np.linalg.cholesky(weight_matrix)
+            # Weighted residuals are given by multiplying by L.T so that
+            # weighted_residuals = L.T @ residuals
+            residuals = L.T @ residuals
+        except np.linalg.LinAlgError:
+            import sys
+            print("Warning: Weight matrix not positive definite. Using unweighted residuals.", file=sys.stderr)
+    return residuals
