@@ -990,14 +990,6 @@ def conjunction_assessment(rso_catalog, ID , padding = 30e3, treshold = 5e3, ori
                   
                     close_time_TDB.append(encounter_time)
 
-                    # Convert time to calendar UTC
-
-                    close_time_TT = astro.time_conversion.TDB_to_TT(encounter_time , Xf_2[:3])
-
-                    close_time_TAI = close_time_TT - 32.184 
-
-                    close_time_UTC = close_time_TAI - 37
-
                     UTC_datetime = astro.time_conversion.date_time_from_epoch(encounter_time)
 
                     year = UTC_datetime.year
