@@ -3,9 +3,9 @@ import math
 from datetime import datetime, timedelta
 import os
 import pandas as pd
+from scipy.interpolate import interp1d
 import pickle
 import sys
-
 
 from tudatpy.numerical_simulation import environment_setup
 
@@ -694,6 +694,40 @@ def latlonht2ecef(lat, lon, ht):
     return r_ecef
 
 
+def eceftoeci(r_ecef, time_of_conversion, bodies):
+    '''
+    This function converts geodetic latitude, longitude and height
+    to a position vector in ECI.
+
+    Parameters
+    ------
+    r_ecef = 3x1 numpy array
+      position vector in ECEF [m]
+
+
+    Returns
+    ------
+    r_eci = 3x1 numpy array
+      position vector in ECI [m]
+    '''
+
+    if bodies is None:
+        body_settings = environment_setup.get_default_body_settings(
+            ["Earth"],
+            "Earth",
+            "J2000")
+        bodies = environment_setup.create_system_of_bodies(body_settings)
+
+    # Rotation matrices
+    earth_rotation_model = bodies.get("Earth").rotation_model
+
+    ecef2eci = earth_rotation_model.body_fixed_to_inertial_rotation(time_of_conversion)
+
+    r_eci = np.dot(ecef2eci, r_ecef)
+
+    return r_eci
+
+
 def eci2ric(rc_vect, vc_vect, Q_eci=[]):
     '''
     This function computes the rotation from ECI to RIC and rotates input
@@ -988,83 +1022,198 @@ def ukf_until_first_truth(state_params, meas_dict, sensor_params, int_params, fi
 # ==============================================================================
 # Least Squares Maneuver Estimation Functions
 # ==============================================================================
+import numpy as np
+import sys
+# No longer need scipy.interpolate
+# Ensure tudatpy.math.interpolators is imported if type hinting is used,
+# but not strictly needed for the logic if the objects are just passed through.
+# from tudatpy.math import interpolators # Optional for type hints
 
-def predict_and_calculate_residuals(maneuver_params_norm, x_initial, t_initial, x_final_true, t_final, state_params, int_params, bodies, weight_matrix=None):
+# Assume prop module (prop.propagate_orbit_both_ways) is defined
+# and NOW RETURNS: tout, Xout, final_state_vector, interpolator_object
+
+def calculate_residuals_for_least_squares_multi_interp(
+    maneuver_params_norm, x_initial, t_initial,
+    t_meas_list, obs_data_list, station_pos_list,
+    t_interval_end, # End time defining the interval for tM_norm calculation
+    state_params, int_params, bodies,
+    full_weight_matrix=None # Expects (3N)x(3N) matrix or None
+):
     """
-    Predicts the final state by propagating the initial state through an impulsive
-    maneuver, and then calculates the residual vector (optionally weighted) between
-    the true final state and the predicted final state.
+    (Handles Multiple Post-Maneuver Observations using Propagator Interpolator)
+    Assumes ALL t_meas_list occur >= tM (derived from t_interval_end).
+    Propagates to tM, applies maneuver, propagates from tM to max(t_meas_list).
+    Uses the interpolator returned by the second propagation leg to get states
+    at measurement times. Calculates observations, computes residuals,
+    concatenates, optionally weights, and returns the result.
 
     Args:
-        maneuver_params_norm (list or np.array): Normalized maneuver parameters
-            [dVx, dVy, dVz, tM_norm], where tM_norm is a normalized time between 0 and 1.
+        maneuver_params_norm (list/np.array): [dVx, dVy, dVz, tM_norm].
         x_initial (np.array): Initial state vector [r, v] at t_initial (6x1).
         t_initial (float): Initial time (seconds since J2000).
-        x_final_true (np.array): True final state vector [r, v] at t_final (6x1).
-        t_final (float): Final time (seconds since J2000).
-        state_params (dict): Propagation parameters for the propagator.
-        int_params (dict): Integration parameters for the propagator.
-        bodies (object): Environment bodies object for the propagator.
-        weight_matrix (np.array, optional): 6x6 weighting matrix. If provided,
-            the residuals will be multiplied by the transpose of the Cholesky factor.
-            If None, unweighted residuals are returned.
+        t_meas_list (list/np.array): List of N measurement times [t1, t2,..., tN].
+                                     Constraint: MUST satisfy t_k >= tM for all k.
+                                     It's assumed t_meas_list[0] >= t_interval_end.
+        obs_data_list (list): List of N measured observation tuples/lists,
+                               [[rg1, ra1, dec1], ...]. Meters and radians.
+        station_pos_list (list): List of N station ECI position vectors [pos1, ...].
+        t_interval_end (float): End time for interval [t_initial, t_interval_end] for tM_norm.
+        state_params (dict): Propagation parameters.
+        int_params (dict): Integration parameters.
+        bodies (object): Environment bodies object (e.g., Tudat SystemOfBodies).
+        full_weight_matrix (np.array, optional): (3N)x(3N) weighting matrix. If None, unweighted.
 
     Returns:
-        np.array: Residual vector (x_final_true - x_predicted) as a 1D array of length 6.
-                If prediction fails, returns a 1D array with large penalized values.
+        np.array: Concatenated residual vector (length 3N), optionally weighted, flattened.
+                  Returns large penalties if prediction/interpolation fails.
     """
-    # Check that the maneuver parameters have the proper number of elements
-    if len(maneuver_params_norm) != 4:
-        raise ValueError("maneuver_params_norm must have 4 elements: [dVx, dVy, dVz, tM_norm]")
+    num_measurements = len(t_meas_list)
+    if not (len(obs_data_list) == num_measurements and len(station_pos_list) == num_measurements):
+        raise ValueError("Input lists must have the same length.")
+    if num_measurements == 0:
+        return np.array([])
 
-    # Unpack the parameters and form the delta-v vector
-    dVx, dVy, dVz, tM_norm = maneuver_params_norm  # tM_norm should be between 0 and 1
+    # --- Input Validation & Maneuver Time ---
+    if len(maneuver_params_norm) != 4: raise ValueError("...")
+    dVx, dVy, dVz = maneuver_params_norm[0:3]; tM_norm_raw = maneuver_params_norm[3]
     delta_v_vec = np.array([[dVx], [dVy], [dVz]])
+    tM_norm = np.clip(tM_norm_raw, 0.0, 1.0)
+    # tM is guaranteed to be <= t_interval_end
+    tM = t_initial + tM_norm * (t_interval_end - t_initial)
+    # Propagation needs to go up to the last measurement time
+    t_prop_end = max(t_meas_list) + 1e-6 if t_meas_list else t_interval_end
+    time_tolerance = 1e-9
 
-    # Map normalized maneuver time to actual time
-    tM = t_initial + tM_norm * (t_final - t_initial)
-
-    # Validate that the maneuver time is within the interval (with slight tolerance)
-    if not (t_initial - 1e-9 <= tM <= t_final + 1e-9):
-        # Return large residuals (flattened) if the maneuver time is out-of-bounds.
-        return np.full(x_final_true.shape, 1e12).flatten()
+    # --- Propagation & State Setup --- # *** SIMPLIFIED: No Leg 1 History/Interp Needed ***
+    interp2 = None # Interpolator for tM to t_prop_end
+    state_at_maneuver_plus_arr = None # Still need state after maneuver
+    propagation_successful = True
+    current_leg=None
 
     try:
-        # 1. Propagate from t_initial to tM
-        # asd and sad represent additional outputs that we do not use here
-        _, _, state_at_maneuver_minus = prop.propagate_orbit_both_ways(x_initial, [t_initial, tM], state_params, int_params, bodies)
-        if state_at_maneuver_minus is None:
-            raise ValueError(f"Propagation from t_initial={t_initial} to tM={tM} failed.")
+        # LEG 1: Propagate from t_initial to tM (Only need final state)
+        state_at_maneuver_minus_arr = None
+        if abs(tM - t_initial) < time_tolerance:
+            state_at_maneuver_minus_arr = x_initial.copy()
+        else:
+            current_leg=int(1)
+            # Use 3rd return value (final state), ignore others (tout, Xout, interp1)
+            _, _, state_at_maneuver_minus_arr, _ = prop.propagate_orbit_both_ways(
+                x_initial, [t_initial, tM], state_params, int_params, current_leg, bodies
+            )
+            if state_at_maneuver_minus_arr is None:
+                raise ValueError(f"Leg 1 propagation t_initial={t_initial} to tM={tM} failed.")
+        # print(f"DEBUG: State at tM={tM:.2f} (before dV) obtained.") # Optional debug
 
-        # 2. Apply the impulsive delta-V at tM
-        state_at_maneuver_plus = state_at_maneuver_minus.copy()
-        state_at_maneuver_plus[3:6] += delta_v_vec  # add dV to the velocity components
+        # Apply delta-V
+        state_at_maneuver_plus_arr = state_at_maneuver_minus_arr.copy()
+        state_at_maneuver_plus_arr[3:6] += delta_v_vec
+        # print(f"DEBUG: Applied dV at tM={tM:.2f}") # Optional debug
 
-        # 3. Propagate from tM to t_final to get the final predicted state
-        _, _, predicted_state_final = prop.propagate_orbit_both_ways(state_at_maneuver_plus, [tM, t_final], state_params, int_params, bodies)
-        if predicted_state_final is None:
-            raise ValueError(f"Propagation from tM={tM} to t_final={t_final} failed.")
+        # LEG 2: Propagate from tM to t_prop_end (Need interpolator)
+        if abs(tM - t_prop_end) < time_tolerance:
+             interp2 = None # No propagation needed if maneuver is at the very end
+             # We will use state_at_maneuver_plus_arr directly if t_meas_k == tM
+             print(f"DEBUG: Leg 2 skipped (tM == t_prop_end ~ {t_prop_end:.2f})")
+        else:
+            current_leg = int(2)
+            # Use 4th return value (interpolator), ignore others
+            _, _, _, interp2 = prop.propagate_orbit_both_ways(
+                 state_at_maneuver_plus_arr, [tM, t_prop_end], state_params, int_params, current_leg, bodies
+             )
+            if interp2 is None:
+                raise ValueError(f"Leg 2 propagation tM={tM} to t_prop_end={t_prop_end} failed.")
+        # print(f"DEBUG: Got interp2 for [{tM:.2f}, {t_prop_end:.2f}]") # Optional debug
 
     except Exception as e:
-        print(f"Error during prediction with params {maneuver_params_norm}: {e}")
-        predicted_state_final = np.full((6, 1), np.nan)
+        print(f"Error during propagation segments: {e}", file=sys.stderr)
+        propagation_successful = False
 
-    # Compute the residuals: flatten to a 1D array
-    if predicted_state_final is None or np.isnan(predicted_state_final).any():
-        residuals = np.full(x_final_true.shape, 1e12).flatten()
-    else:
-        residuals = (x_final_true - predicted_state_final).flatten()
+    if not propagation_successful:
+        print("DEBUG: Propagation failed, returning penalty.", file=sys.stderr)
+        return np.full(3 * num_measurements, 1e12).flatten()
 
-    # Apply weighting if a weight_matrix is provided.
-    if weight_matrix is not None:
-        if weight_matrix.shape != (6, 6):
-            raise ValueError("Weight matrix must be 6x6")
+    # --- Loop Through Measurements, Interpolate, Calculate Residuals --- # *** SIMPLIFIED ***
+    all_residuals_list = []
+    for k in range(num_measurements):
+        t_meas_k = t_meas_list[k]
+        obs_data_k = obs_data_list[k]
+        station_pos_k = station_pos_list[k]
+
+        residuals_k = np.full(3, 1e12) # Default to penalty
+        x_pred_k_flat = None
+
         try:
-            L = np.linalg.cholesky(weight_matrix)
-            # Weighted residuals are given by multiplying by L.T so that
-            # weighted_residuals = L.T @ residuals
-            residuals = L.T @ residuals
+            # Given constraint: All t_meas_k >= tM
+            # Check if measurement is exactly at maneuver time
+            if abs(t_meas_k - tM) < time_tolerance:
+                 # Use the state immediately AFTER the maneuver
+                 x_pred_k_flat = state_at_maneuver_plus_arr.flatten()
+                 # print(f"DEBUG k={k}: Using post-maneuver state at t=tM={t_meas_k:.2f}")
+
+            # Check if measurement requires interpolation from Leg 2
+            elif interp2 is not None: # Check if Leg 2 was propagated and interp exists
+                 # Clamp time to ensure it's within bounds for interpolator
+                 t_interp = np.clip(t_meas_k, tM, t_prop_end)
+                 # Optional: Check if clamping was significant
+                 # if abs(t_interp - t_meas_k) > time_tolerance * 10:
+                 #      print(f"Warning: Clamped interp time k={k} from {t_meas_k:.3f} to {t_interp:.3f}", file=sys.stderr)
+
+                 # Use the interpolator from Leg 2
+                 x_pred_k_flat = interp2.interpolate(t_interp)
+                 # print(f"DEBUG k={k}: Using interp2 at t={t_meas_k:.2f} (using {t_interp:.2f})")
+            else:
+                 # This case means t_meas_k > tM, but interp2 is None (because tM == t_prop_end).
+                 # This implies t_meas_k > t_prop_end, which shouldn't happen if t_prop_end=max(t_meas).
+                 # Or it means Leg 2 failed to produce an interpolator.
+                 print(f"Warning: Cannot get state for k={k} at t={t_meas_k:.3f}. "
+                       f"interp2 is None (tM={tM:.3f}, t_prop_end={t_prop_end:.3f}). Assigning penalty.", file=sys.stderr)
+                 # Keep residuals_k as penalty
+
+            # Proceed if state was obtained
+            if x_pred_k_flat is not None:
+                if np.isnan(x_pred_k_flat).any():
+                     print(f"Warning: Interpolated/assigned state is NaN for k={k}, t={t_meas_k}", file=sys.stderr)
+                     # Keep residuals_k as penalty
+                else:
+                    # --- Observation calculation ---
+                    predicted_pos_k = x_pred_k_flat[0:3]; spacecraft_pos_flat = np.asarray(predicted_pos_k).flatten()
+                    station_pos_flat = np.asarray(station_pos_k).flatten()
+                    if station_pos_flat.shape[0] == 6: station_pos_flat = station_pos_flat[0:3]
+                    elif station_pos_flat.shape[0] != 3: raise ValueError("...")
+                    rho_vec = spacecraft_pos_flat - station_pos_flat; range_pred = np.linalg.norm(rho_vec)
+
+                    if range_pred < 1e-9: # Coincident check
+                         print(f"Warning: Coincident position at k={k}, t={t_meas_k}", file=sys.stderr)
+                    else: # Calculate actual residuals
+                         ra_pred = np.arctan2(rho_vec[1], rho_vec[0]); dec_pred = np.arcsin(rho_vec[2] / range_pred)
+                         range_meas, ra_meas, dec_meas = obs_data_k
+                         delta_range = range_meas - range_pred; delta_dec = dec_meas - dec_pred
+                         delta_ra_raw = ra_meas - ra_pred; delta_ra = (delta_ra_raw + np.pi) % (2 * np.pi) - np.pi
+                         residuals_k = np.array([delta_range, delta_ra, delta_dec])
+
+        except Exception as e:
+            print(f"Error during interpolation/residual calculation for k={k}, t={t_meas_k}: {e}", file=sys.stderr)
+            # Keep residuals_k as penalty
+
+        all_residuals_list.append(residuals_k)
+
+    # --- Concatenate All Residuals ---
+    if not all_residuals_list:
+        print("Warning: No measurement residuals generated.", file=sys.stderr)
+        return np.full(3 * num_measurements if num_measurements > 0 else 3, 1e12).flatten()
+    concatenated_residuals = np.concatenate(all_residuals_list).flatten()
+
+    # --- Apply Full Weighting Matrix (Optional) ---
+    final_residuals = concatenated_residuals
+    if full_weight_matrix is not None:
+        # ... (Weighting logic remains the same) ...
+        expected_shape = (3*num_measurements, 3*num_measurements)
+        if full_weight_matrix.shape != expected_shape: raise ValueError("...")
+        try:
+            L = np.linalg.cholesky(full_weight_matrix); final_residuals = L.T @ concatenated_residuals
         except np.linalg.LinAlgError:
-            import sys
-            print("Warning: Weight matrix not positive definite. Using unweighted residuals.", file=sys.stderr)
-    return residuals
+            print("Warning: Full weight matrix not positive definite...", file=sys.stderr)
+
+    # --- Final Output ---
+    return final_residuals.flatten()

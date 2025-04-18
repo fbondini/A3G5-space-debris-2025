@@ -7,12 +7,17 @@ from EstimationUtilities import *
 from TudatPropagator import *
 from ConjunctionUtilities import *
 import numpy as np
+import traceback
 from tudatpy import astro
 from tudatpy.kernel.astro import two_body_dynamics
+from tudatpy.kernel.astro import frame_conversion
 import sys
+from tudatpy.kernel.astro import two_body_dynamics
 
-show_them_figures = bool(False)
 
+#############################################################
+#Load the utilities, nicely sort them out #################
+#############################################################
 bodies = prop.tudat_initialize_bodies()
 
 rso_meas_path = str(Path(__file__).parent / "data" / "group5" / "estimated_rso_catalog.pkl")
@@ -53,6 +58,10 @@ state_params['sph_ord']=Q2_spho
 state_params['central_bodies']=Q2_cenb
 state_params['bodies_to_create']=Q2_btcr
 
+#Sensor parameters
+station_ecef = np.array(Q2_sensor_params['sensor_ecef'])
+station_sigma = Q2_sensor_params['sigma_dict']
+
 # Setup filter parameters such as process noise from unit test
 Qeci = 1e-12*np.diag([1., 1., 1.])
 Qric = 1e-12*np.diag([1., 1., 1.])
@@ -72,29 +81,7 @@ int_params['min_step'] = 1e-3
 int_params['rtol'] = 1e-12
 int_params['atol'] = 1e-12
 
-# t_prop_Q2, X_prop_Q2 = propagate_orbit(Q2_state, times_of_measurements, state_params, int_params, bodies=None)
-# propagated_positions = X_prop_Q2[:, :3]
-# norm_of_propagated_positions=np.linalg.norm(propagated_positions, axis = 1)
-# times_for_plot_V2=[]
-# positions_for_plot_V2=[]
-# ii=0
-# exit=0
-# for ii in range(len(times_for_plot)):
-#     if exit == 0:
-#         newtime=t_prop_Q2[ii]-t_prop_Q2[0]
-#         times_for_plot_V2.append(newtime)
-#         positions_for_plot_V2.append(norm_of_propagated_measurement[ii]) #s since initial epoch
-#         if newtime >= 24 * 3600:
-#             exit = 1
-#
-#
-#
-#
-# # norm_of_filtered_mesurement = np.linalg.norm(filtered_mesurement, axis = 1)
-#
-#
-# plt.plot(times_for_plot_V2, positions_for_plot_V2)
-# plt.plot(times_for_plot, positions_for_plot)
+
 
 #############################################################
 #Nice plots for clusters and measurements ###################
@@ -165,7 +152,7 @@ for col in range(n_clusters):
     ax2.set_xlabel("Time (s)")
 
 plt.tight_layout()
-plt.show()
+# plt.show()
 
 #Use the UKF until it fails (it will fail because of the DeltaV manuver):
 filtered_outputs_V2 =ukf_until_first_truth(Q2_state_params, Q2_meas_dict, Q2_sensor_params, int_params, filter_params, bodies)
@@ -192,20 +179,29 @@ plt.tight_layout()
 # consult diagram above if needed)
 tol_max = 10**2
 jump_indices = np.where(np.abs(found_residuals_until_failure[:,0]) > tol_max)[0]
+filtered_outputs_v2_times = np.vstack(list(filtered_outputs_V2.keys()))
 
 if jump_indices.size > 0:
     # Get the first jump index. Here, the jump occurs between index i and i+1.
     first_jump_index = jump_indices[0]
 
     # The corresponding times:
-    pre_jump_time = np.vstack(list(filtered_outputs_V2.keys()))[first_jump_index - 1]
+    pre_jump_time = filtered_outputs_v2_times[first_jump_index - 1]
     pre_jump_time = float(pre_jump_time)
-    post_jump_time = np.vstack(list(filtered_outputs_V2.keys()))[first_jump_index]
+    post_jump_time = filtered_outputs_v2_times[first_jump_index]
     post_jump_time=float(post_jump_time)
 
     print("First jump occurs between indices {} and {}.".format(first_jump_index - 1, first_jump_index))
     print(f"Pre-jump time: {pre_jump_time}")
     print(f"Post-jump time: {post_jump_time}")
+
+    #Create the times of measurement points within this measurement cluster:
+    ii=1
+    list_of_measurement_times=[]
+    while filtered_outputs_v2_times[first_jump_index+ii]-filtered_outputs_v2_times[first_jump_index+ii-1] <= (post_jump_time-pre_jump_time):
+        list_of_measurement_times.append(filtered_outputs_v2_times[first_jump_index+ii-1])
+        ii+=1
+
 else:
     print(f"No jump greater than {tol_max} was found.")
 
@@ -215,6 +211,8 @@ state_pre_maneuver_ukf = filtered_outputs_V2[pre_jump_time]['state']
 cov_pre_maneuver_ukf =filtered_outputs_V2[pre_jump_time]['covar']
 resids_pre_maneuver_ukf = filtered_outputs_V2[pre_jump_time]['resids']
 # print(f"resids_pre_maneuver_ukf: {resids_pre_maneuver_ukf}")
+measured_pre_jump = measurements_of_sensors[first_jump_index-1]
+#print(f"measured_pre_jump: {measured_pre_jump}")
 
 state_post_maneuver_ukf = filtered_outputs_V2[post_jump_time]['state']
 # print(f"state_post_maneuver_ukf: {state_post_maneuver_ukf}")
@@ -222,101 +220,207 @@ cov_post_maneuver_ukf =filtered_outputs_V2[post_jump_time]['covar']
 resids_post_maneuver_ukf = filtered_outputs_V2[post_jump_time]['resids']
 # print(f"resids_post_maneuver_ukf: {resids_post_maneuver_ukf}")
 
+obs_post_jump_list=[]
+for ii in range(len(list_of_measurement_times)):
+    obs_post_jump_list.append(measurements_of_sensors[first_jump_index+ii])
+# print(obs_post_jump_list)
+
 h_pre_maneuver = np.cross(state_pre_maneuver_ukf[:3].flatten(), state_pre_maneuver_ukf[3:6].flatten())
 h_post_maneuver = np.cross(state_post_maneuver_ukf[:3].flatten(), state_post_maneuver_ukf[3:6].flatten())
 print(f"Sanity check for the conservation of angular momentum, this is the change in angular momentum of the two states:"
       f" {np.linalg.norm(h_pre_maneuver) - np.linalg.norm(h_post_maneuver)}")
 
-#Define a fixed step size integrator (RKF78 for precision baby)
-amount_of_data_points = 100
+#############################################################
+#Set up station in Lat,Lon, Hei, then convert it to ECI #####
+#############################################################
+station_eci_list = []
+for ii in range(len(list_of_measurement_times)):
+    station_eci = eceftoeci(station_ecef, list_of_measurement_times[ii], bodies)
+    station_eci_list.append(station_eci)
+
+#############################################################
+#Set up a fixed step size integrator (RKF78 for precision baby)
+#############################################################
+amount_of_data_points = 200
 time_step_size = (post_jump_time-pre_jump_time)/amount_of_data_points
 print(f"Numerical simulations will use a timestep size of {time_step_size} seconds")
 rkf78_fixed_int_params = {}
 rkf78_fixed_int_params['tudat_integrator'] = 'rk78_fixed'
 rkf78_fixed_int_params['step'] = time_step_size
 
+#############################################################
+#Start least squares optimization ###########################
+#############################################################
 print(f"Least Squares started")
-# Optional: Define a weight matrix (e.g., inverse of expected final state covariance P+)
-# If P+ is unknown, set weight_matrix = None for unweighted LSQ.
-# Example: Diagonal weighting (penalize position errors more than velocity)
-weights = np.array([1e-6, 1e-6, 1e-6, 1.0, 1.0, 1.0]) # Higher weight = lower expected variance
-weight_matrix = np.diag(weights)
-# weight_matrix = None # Use unweighted for this example
+#Create weight matrix assuming uncorrelated measurements W = diag(1/sigma^2)!
+N=len(list_of_measurement_times)
+weight_diagonal = [
+    1.0 / (station_sigma['rg']**2),
+    1.0 / (station_sigma['ra']**2),
+    1.0 / (station_sigma['dec']**2)
+]
+weight_matrix = np.kron(np.eye(N), np.diag(weight_diagonal))
+print(f"Using Weight Matrix (diagonal): {weight_diagonal}")
 
-# --- Initial Guess and Bounds for LSQ ---
-# Guess: Zero delta-V, maneuver at normalized midpoint time (0.5)
-initial_guess_params_norm = [0.0, 0.0, 0.0, 0.5] # dVx, dVy, dVz, tM_norm
-print(f"\nInitial Guess: dV=[{initial_guess_params_norm}, tM={initial_guess_params_norm[3]}")
+#Lambert for initial guess of the deltaV
+sun_gm = 398600.4418 # [m^3/s^2]
 
-# Bounds: dV can be anything, tM must be within the interval
-# Adjust dV bounds based on expected maneuver capability if known
-bounds = ([-np.inf, -np.inf, -np.inf, 0.0], # Lower bounds [dVx, dVy, dVz, tM]
+# Given initial values
+initial_epoch = pre_jump_time # [s]
+final_epoch = post_jump_time # [s]
+departure_pos_initial_epoch = state_pre_maneuver_ukf[0:3] # [m]
+target_pos_final_epoch = state_post_maneuver_ukf[0:3] # [m]
+
+# Solve Lambert's problem
+lambert_targeter = two_body_dynamics.LambertTargeterIzzo(
+	departure_position = departure_pos_initial_epoch,
+	arrival_position = target_pos_final_epoch,
+	time_of_flight = final_epoch - initial_epoch,
+	gravitational_parameter = sun_gm)
+
+# Extract results
+v1, v2 = lambert_targeter.get_velocity_vectors()
+# Print the results
+np.set_printoptions(formatter={'float': '{: 9.3e}'.format})
+print('|V1|{tab} = {v1:6.3f}{tab} [km/s] {cr}|V2|{tab} = {v2:6.3f}{tab} [km/s]'.format(v1=np.linalg.norm(v1)/1e3, v2=np.linalg.norm(v2)/1e3, cr='\n', tab='\t'))
+print(' V1{tab} = {v1}{tab} [km/s] {cr} V2{tab} = {v2}{tab} [km/s]'.format(v1 = np.array2string(v1/1e3, formatter = {'float_kind': '{0:+6.3f}'.format}), v2 = np.array2string(v2/1e3, formatter = {'float_kind': '{0:+6.3f}'.format}), cr='\n', tab='\t'))
+
+initial_guess_params_norm = [100.0, 100.0, 100.0, 0.5] #Initial Guess: dVx, dVy, dVz, tM_norm
+
+# Bounds: dV can be anything, tM must be within the normalized interval pre-jump, post-jump
+bounds = ([-np.inf, -np.inf, -np.inf, 0.1], # Lower bounds [dVx, dVy, dVz, tM]
           [ np.inf,  np.inf,  np.inf, 1.0])   # Upper bounds [dVx, dVy, dVz, tM]
 
-#DEBUG
-# # --- Manually test the prediction with the initial guess ---
-# print("\nTesting predict_final_state with initial guess...")
-# predicted_state_test = predict_final_state(
-#     initial_guess_params_norm, state_pre_maneuver_ukf, pre_jump_time, post_jump_time,
-#     Q2_state_params, rkf78_fixed_int_params, bodies
-# )
-# print(f"Result of predict_final_state: {predicted_state_test}")
-# # --- End Manual Test ---
-#
-# # --- Perform Least Squares Estimation ---
-# print("\nStarting Non-linear Least Squares Estimation...")
+# --- Run Optimization ---
 try:
+    dVx_init, dVy_init, dVz_init, tM_norm_init = initial_guess_params_norm
+    print(f"Initial Guess: dV=[{dVx_init}, {dVy_init}, {dVz_init}], tM_norm={tM_norm_init}\n")
+
     result = least_squares(
-        predict_and_calculate_residuals,
+        calculate_residuals_for_least_squares_multi_interp,
         initial_guess_params_norm,
-        args=(state_pre_maneuver_ukf, pre_jump_time, state_post_maneuver_ukf, post_jump_time,
+        args=(state_pre_maneuver_ukf, pre_jump_time, #Pre-maneuver state and time
+              list_of_measurement_times, obs_post_jump_list, station_eci_list, # Observation data
+              post_jump_time, # End time defining the interval for tM_norm calculation
               Q2_state_params, rkf78_fixed_int_params, bodies,
-              weight_matrix), # Pass arguments for residual function
+              weight_matrix), # Pass 3Nx3N weight matrix or None
         bounds=bounds,
         method='trf',
         jac='3-point',
-        x_scale='jac', #Let the optimizer estimate scales
-        loss='soft_l1',
-        ftol=1e-10,  # *** TIGHTEN TOLERANCES ***
-        xtol=1e-10,
-        gtol=1e-10,
-        max_nfev=500,  # Allow more iterations
+        x_scale='jac',
+        #diff_step=1e-6,  # Explicit relative step size
+        ftol=None, #If None and ‘method’ is not ‘lm’, the termination by this condition is disabled.
+        loss='linear', # 'linear' if residuals are expected to be Gaussian
+        max_nfev=500,
         verbose=2
     )
+
+    # --- Process Results ---
+    if result.success:
+        print("\nOptimization Successful!")
+        optimized_params_norm = result.x
+        dVx, dVy, dVz, tM_norm = optimized_params_norm
+        # Calculate absolute maneuver time from normalized result
+        t_impulse = pre_jump_time + tM_norm * (post_jump_time - pre_jump_time)  # Using post_jump_time as interval end
+
+        print(f"  Optimized dV [m/s]: [{dVx:.4f}, {dVy:.4f}, {dVz:.4f}]")
+        print(f"  Optimized Maneuver Time (normalized): {tM_norm:.6f}")
+        print(f"  Optimized Maneuver Time (absolute): {t_impulse:.4f}")
+        print(f"  Final Cost: {result.cost:.6e}")
+        print(f"  Number of Function Evaluations: {result.nfev}")
+        print(f"  Termination Status: {result.status}")
+        print(f"  Termination Message: {result.message}")
+
+        # --- Calculate and Print Final Unweighted Residuals ---
+        print("\n  Calculating final unweighted observation residuals...")
+        try:
+            # Call the function again with optimized params and crucially NO weighting
+            final_raw_residuals_vector = calculate_residuals_for_least_squares_multi_interp(
+                optimized_params_norm,  # Use the optimal parameters found
+                state_pre_maneuver_ukf,
+                pre_jump_time,
+                list_of_measurement_times,
+                obs_post_jump_list,
+                station_eci_list,
+                post_jump_time,
+                state_params=Q2_state_params,
+                int_params=rkf78_fixed_int_params,
+                bodies=bodies,
+                full_weight_matrix=None  # SET WEIGHTS TO NONE!!!!
+            )
+
+            print("  Final Unweighted Residuals (Measured - Predicted):")
+            num_measurements = len(list_of_measurement_times)
+            if len(final_raw_residuals_vector) == 3 * num_measurements:
+                for k in range(num_measurements):
+                    # Extract residuals for measurement k
+                    res_k = final_raw_residuals_vector[k * 3: k * 3 + 3]
+                    t_meas_k = list_of_measurement_times[k]
+                    # Convert angles to degrees for easier interpretation
+                    delta_range_m = res_k[0]
+                    delta_ra_deg = np.degrees(res_k[1])  # Convert rad to deg
+                    delta_dec_deg = np.degrees(res_k[2])  # Convert rad to deg
+
+                    print(f"    Time {t_meas_k}: "
+                          f"dRange = {delta_range_m:} m, "
+                          f"dRA = {delta_ra_deg} deg, "
+                          f"dDec = {delta_dec_deg} deg")
+            else:
+                print(f"  Could not process final residuals vector shape: {final_raw_residuals_vector.shape}")
+                print(f"  Raw vector: {final_raw_residuals_vector}")
+
+
+        except Exception as post_err:
+            print(f"\n  Error calculating final unweighted residuals: {post_err}")
+            traceback.print_exc()
+        # ---------------------------------------------------------
+
+    else:
+        print(f"\nOptimization Failed: {result.message}")
+        print(f"  Termination Status: {result.status}")
+        # print(f"  Result object:\n{result}") # Optional detailed failure info
+
+
 except Exception as e:
     print(f"\nError during least_squares optimization: {e}")
-    sys.exit(1)
+    traceback.print_exc()
+# cost_list = []
+# tm_tries = [0.0, 0.1, 0.25, 0.5, 0.75]
+# for element in tm_tries:
+#     res_tm_try = calculate_residuals_for_least_squares_multi_interp(
+#                 [optimized_params_norm[0], optimized_params_norm[1], optimized_params_norm[2], element],
+#                 state_pre_maneuver_ukf,
+#                 pre_jump_time,
+#                 list_of_measurement_times,
+#                 obs_post_jump_list,
+#                 station_eci_list,
+#                 post_jump_time,
+#                 state_params=Q2_state_params,
+#                 int_params=rkf78_fixed_int_params,
+#                 bodies=bodies,
+#                 full_weight_matrix=None
+#             )
+#     res_tm_sq =res_tm_try**2
+#     cost_list.append(res_tm_sq)
+# fig, ax = plt.subplot()
+# ax.scatter(tm_tries, cost_list)
+# plt.show()
 
-# --- Display Results ---
-print("\n--- Estimation Results ---")
-if result.success:
-    estimated_params_norm = result.x
-    estimated_dV = estimated_params_norm[0:3]
-    estimated_tM_norm = estimated_params_norm[3]
-    # --- Convert normalized time back to actual time for reporting ---
-    estimated_tM = pre_jump_time + estimated_tM_norm * (post_jump_time - pre_jump_time)
-    # --- End Conversion ---
-    final_residuals = result.fun # Residuals corresponding to the solution
+#############################################################
+#Propagate from pre-jump to jump time #######################
+#############################################################
+rkf78_fixed_int_params['step'] = (t_impulse - pre_jump_time)/amount_of_data_points
 
-    print(f"Status: {result.message}")
-    print(f"Success: {result.success}")
-    print(f"Estimated dV: {estimated_dV} = {np.linalg.norm(estimated_dV)} m/s")
-    print(f"Estimated tM: {estimated_tM} s")
-    print(f"Cost (Sum of Squared Residuals): {result.cost}")
-    print(f"Optimality (Infinity Norm of Gradient): {result.optimality}")
-    print(f"Number of Function Evaluations: {result.nfev}")
-    print(f"Final Residual Vector: {final_residuals}") # Can be long
-else:
-    print(f"Estimation Failed.")
-    print(f"Status: {result.message}")
-
-print("--------------------------")
-
-#
-
-
-
-
+tf, Xf, Pf = propagate_state_and_covar(state_pre_maneuver_ukf, #x0
+    cov_pre_maneuver_ukf, #p0
+    np.array([pre_jump_time, t_impulse]),#t_vec
+    state_params, #state_params, bodies=
+    rkf78_fixed_int_params, #int_params
+    bodies) #bodies)
+Asd = np.array([Xf[0], Xf[1], Xf[2], Xf[3] + dVx, Xf[4] + dVy, Xf[5] + dVz])
+print(f"tf: {tf}")
+print(f"Xf: {Asd}")
+print(f"Pf: {Pf}")
 #
 # #Propagate the pre_maneuver state forward, until the time of the already changed state:
 # t_pre_maneuver_list = []

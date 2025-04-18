@@ -10,6 +10,7 @@ from tudatpy.numerical_simulation import propagation_setup
 from tudatpy.astro.time_conversion import DateTime
 from tudatpy.astro import element_conversion
 from tudatpy.util import result2array
+from tudatpy.math import interpolators
 from scipy.optimize import least_squares
 
 # Load spice kernels
@@ -250,7 +251,7 @@ def propagate_orbit(Xo, tvec, state_params, int_params, bodies=None):
     return tout, Xout
 
 
-def propagate_orbit_both_ways(Xo, tvec, state_params, int_params, bodies=None):
+def propagate_orbit_both_ways(Xo, tvec, state_params, int_params, leg, bodies=None):
     '''
     This function propagates an orbit using physical parameters provided in
     state_params and integration parameters provided in int_params.
@@ -294,8 +295,10 @@ def propagate_orbit_both_ways(Xo, tvec, state_params, int_params, bodies=None):
 
     '''
 
-    # Initial state
+    # Initial state always corresponds to the start time tvec[0]
     initial_state = Xo.flatten()
+    simulation_start_epoch = float(tvec[0])
+    simulation_end_epoch = float(tvec[-1])  # Target end time
 
     # Retrieve input parameters
     central_bodies = state_params['central_bodies']
@@ -307,15 +310,12 @@ def propagate_orbit_both_ways(Xo, tvec, state_params, int_params, bodies=None):
     sph_deg = state_params['sph_deg']
     sph_ord = state_params['sph_ord']
 
-    # Simulation start and end
-    #Check if it is backwards or forwards integration:
-    iteration_way_check=tvec[0]-tvec[-1]
-    if iteration_way_check < 0: #Backwards propagation!
-        simulation_start_epoch = tvec[-1]
-        simulation_end_epoch = tvec[0]
-    else:
-        simulation_start_epoch = tvec[0]
-        simulation_end_epoch = tvec[-1]
+    # Determine propagation direction (for info/debug purposes)
+    # is_backward_propagation = simulation_end_epoch < simulation_start_epoch
+    # if is_backward_propagation:
+    #     print(f"DEBUG: Propagating backward from {simulation_start_epoch} to {simulation_end_epoch}")
+    # else:
+    #     print(f"DEBUG: Propagating forward from {simulation_start_epoch} to {simulation_end_epoch}")
 
     # Setup bodies
     if bodies is None:
@@ -340,13 +340,6 @@ def propagate_orbit_both_ways(Xo, tvec, state_params, int_params, bodies=None):
                 bodies, jj_str, aero_coefficient_settings)
 
         if Cr > 0.:
-            # occulting_bodies = ['Earth']
-            # radiation_pressure_settings = environment_setup.radiation_pressure.cannonball(
-            #     'Sun', srp_area_m2, Cr, occulting_bodies
-            # )
-            # environment_setup.add_radiation_pressure_interface(
-            #     bodies, jj_str, radiation_pressure_settings)
-
             occulting_bodies_dict = dict()
             occulting_bodies_dict["Sun"] = ["Earth"]
 
@@ -399,33 +392,22 @@ def propagate_orbit_both_ways(Xo, tvec, state_params, int_params, bodies=None):
 
     # Create numerical integrator settings
     if int_params['tudat_integrator'] == 'rk4':
-        if iteration_way_check < 0:  # Backwards propagation!
-            fixed_step_size = -abs(int_params['step'])
-        else:
-            fixed_step_size = int_params['step']
+        fixed_step_size =abs(int_params['step'])
         integrator_settings = propagation_setup.integrator.runge_kutta_4(
             fixed_step_size
         )
 
     elif int_params['tudat_integrator'] == 'rk78_fixed':
-        if iteration_way_check < 0:  # Backwards propagation!
-            fixed_step_size = -abs(int_params['step'])
-        else:
-            fixed_step_size = int_params['step']
+        fixed_step_size = abs(int_params['step'])
         integrator_settings = propagation_setup.integrator.runge_kutta_fixed_step(
             time_step=fixed_step_size,
             coefficient_set=propagation_setup.integrator.CoefficientSets.rkf_78,
             order_to_use=propagation_setup.integrator.OrderToIntegrate.higher)
 
     elif int_params['tudat_integrator'] == 'rkf78':
-        if iteration_way_check < 0:  # Backwards propagation!
-            initial_step_size = -abs(int_params['step'])
-            maximum_step_size = -abs(int_params['max_step'])
-            minimum_step_size = -abs(int_params['min_step'])
-        else:
-            initial_step_size = int_params['step']
-            maximum_step_size = int_params['max_step']
-            minimum_step_size = int_params['min_step']
+        initial_step_size = abs(int_params['step'])
+        maximum_step_size = abs(int_params['max_step'])
+        minimum_step_size = abs(int_params['min_step'])
         rtol = int_params['rtol']
         atol = int_params['atol']
         integrator_settings = propagation_setup.integrator.runge_kutta_variable_step_size(
@@ -454,14 +436,50 @@ def propagate_orbit_both_ways(Xo, tvec, state_params, int_params, bodies=None):
     states = dynamics_simulator.state_history
     states_array = result2array(states)
 
-    tout = states_array[:, 0]
-    Xout = states_array[:, 1:6 * N + 1]
+    tout = states_array[:,0]
+    Xout = states_array[:,1:6*N+1]
     final_state_components = Xout[-1,:]  # Gets [rx, ry, rz, vx, vy, vz] as a 1D array (should be shape (6,))
 
     # Reshape the 1D array into a 6x1 column vector
     final_state_vector = final_state_components.reshape(6, 1)
 
-    return tout, Xout, final_state_vector
+    # --- Conditional Interpolator Creation ---
+    interpolator = None  # Initialize to None
+
+    if leg != 1:  # Only create interpolator for the second leg (or any leg other than 1)
+        # print(f"DEBUG: Creating interpolator for Leg {leg}")
+        try:
+            # Check if there are enough points for the requested Lagrange order
+            # Lagrange order N requires N+1 points. Order 8 needs 9 points.
+            number_of_lagrange_points = 8
+            if len(states) < number_of_lagrange_points:
+                test = 1.0
+                # print(f"Warning: Not enough points ({len(states)}) in state history for "
+                #       f"Lagrange interpolation order {number_of_lagrange_points}. "
+                #       f"Skipping interpolator creation for Leg {leg}.")
+                # Keep interpolator as None
+            else:
+                interpolator_settings = interpolators.lagrange_interpolation(
+                    number_of_lagrange_points
+                )
+                # Create interpolator using the raw 'states' dict
+                interpolator = interpolators.create_one_dimensional_vector_interpolator(
+                    states,  # Pass the state dictionary directly
+                    interpolator_settings,
+                )
+                # print(f"DEBUG: Lagrange Interpolator (order {number_of_lagrange_points}) created for Leg {leg}.")
+
+        except Exception as e:
+            print(f"ERROR: Failed to create Tudat interpolator for Leg {leg}: {e}")
+            # Ensure interpolator is None if creation fails
+            interpolator = None
+    else:
+        test = 1.0
+        # print(f"DEBUG: Skipping interpolator creation for Leg 1.")
+    # -----------------------------------------
+
+    # Return values; interpolator will be None if leg == 1 or if creation failed
+    return tout, Xout, final_state_vector, interpolator
 
 
 def propagate_state_and_covar(Xo, Po, tvec, state_params, int_params, bodies=None, alpha=1e-4):
