@@ -1022,16 +1022,6 @@ def ukf_until_first_truth(state_params, meas_dict, sensor_params, int_params, fi
 # ==============================================================================
 # Least Squares Maneuver Estimation Functions
 # ==============================================================================
-import numpy as np
-import sys
-# No longer need scipy.interpolate
-# Ensure tudatpy.math.interpolators is imported if type hinting is used,
-# but not strictly needed for the logic if the objects are just passed through.
-# from tudatpy.math import interpolators # Optional for type hints
-
-# Assume prop module (prop.propagate_orbit_both_ways) is defined
-# and NOW RETURNS: tout, Xout, final_state_vector, interpolator_object
-
 def calculate_residuals_for_least_squares_multi_interp(
     maneuver_params_norm, x_initial, t_initial,
     t_meas_list, obs_data_list, station_pos_list,
@@ -1084,7 +1074,7 @@ def calculate_residuals_for_least_squares_multi_interp(
     t_prop_end = max(t_meas_list) + 1e-6 if t_meas_list else t_interval_end
     time_tolerance = 1e-9
 
-    # --- Propagation & State Setup --- # *** SIMPLIFIED: No Leg 1 History/Interp Needed ***
+    # --- Propagation & State Setup --- #
     interp2 = None # Interpolator for tM to t_prop_end
     state_at_maneuver_plus_arr = None # Still need state after maneuver
     propagation_successful = True
@@ -1133,7 +1123,7 @@ def calculate_residuals_for_least_squares_multi_interp(
         print("DEBUG: Propagation failed, returning penalty.", file=sys.stderr)
         return np.full(3 * num_measurements, 1e12).flatten()
 
-    # --- Loop Through Measurements, Interpolate, Calculate Residuals --- # *** SIMPLIFIED ***
+    #Loop Through Measurements, Interpolate then calculate Residuals
     all_residuals_list = []
     for k in range(num_measurements):
         t_meas_k = t_meas_list[k]
